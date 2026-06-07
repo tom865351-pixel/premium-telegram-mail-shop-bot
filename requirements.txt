@@ -4,3 +4,4 @@ SQLAlchemy==2.0.31
 pydantic-settings==2.3.4
 python-dotenv==1.0.1
 greenlet==3.0.3
+openpyxl==3.1.5

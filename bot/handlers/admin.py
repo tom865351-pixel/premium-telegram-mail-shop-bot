@@ -1,8 +1,12 @@
+import csv
+from io import BytesIO, StringIO
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
+from openpyxl import load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
@@ -15,6 +19,8 @@ from bot.services.stats import admin_stats
 from bot.utils.formatting import money
 
 router = Router()
+
+SUPPORTED_STOCK_EXTENSIONS = (".xlsx", ".csv", ".txt")
 
 
 class ProductForm(StatesGroup):
@@ -32,6 +38,46 @@ class CouponAdminForm(StatesGroup):
 
 def is_admin(user_id: int) -> bool:
     return user_id in get_settings().admin_ids
+
+
+def _looks_like_header(values: list[str]) -> bool:
+    header_words = {"email", "mail", "username", "user", "password", "pass", "account", "accounts"}
+    lowered = {value.strip().lower() for value in values if value.strip()}
+    return bool(lowered & header_words)
+
+
+def _stock_line_from_cells(cells: list[object]) -> str | None:
+    values = [str(cell).strip() for cell in cells if cell is not None and str(cell).strip()]
+    if not values or _looks_like_header(values):
+        return None
+    if len(values) >= 2:
+        return f"{values[0]}|{values[1]}"
+    return values[0]
+
+
+def parse_stock_file(file_name: str, data: bytes) -> list[str]:
+    lowered = file_name.lower()
+    if lowered.endswith(".xlsx"):
+        workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
+        worksheet = workbook.active
+        lines = []
+        for row in worksheet.iter_rows(values_only=True):
+            line = _stock_line_from_cells(list(row))
+            if line:
+                lines.append(line)
+        workbook.close()
+        return lines
+
+    if lowered.endswith(".csv"):
+        text = data.decode("utf-8-sig", errors="ignore")
+        rows = csv.reader(StringIO(text))
+        return [line for row in rows if (line := _stock_line_from_cells(row))]
+
+    if lowered.endswith(".txt"):
+        text = data.decode("utf-8-sig", errors="ignore")
+        return [line.strip() for line in text.splitlines() if line.strip()]
+
+    raise ValueError("Unsupported file type.")
 
 
 @router.message(Command("admin"))
@@ -171,7 +217,7 @@ async def add_stock_for_product(callback: CallbackQuery, state: FSMContext) -> N
     await state.update_data(product_id=product_id)
     await state.set_state(StockForm.payload)
     await callback.message.edit_text(
-        "Send bulk stock lines, one item per line.\n\n"
+        "Send bulk stock lines, one item per line, or upload .xlsx/.csv/.txt.\n\n"
         "email1@example.com|password1\nemail2@example.com|password2",
         reply_markup=back_menu(),
     )
@@ -190,14 +236,49 @@ async def stock_product_id(message: Message, state: FSMContext) -> None:
     await state.update_data(product_id=product_id)
     await state.set_state(StockForm.payload)
     await message.answer(
-        "Send bulk stock lines, one item per line.\n\n"
+        "Send bulk stock lines, one item per line, or upload .xlsx/.csv/.txt.\n\n"
         "email1@example.com|password1\nemail2@example.com|password2"
+    )
+
+
+@router.message(StockForm.payload, F.document)
+async def stock_payload_file(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    document = message.document
+    file_name = document.file_name or ""
+    if not file_name.lower().endswith(SUPPORTED_STOCK_EXTENSIONS):
+        await message.answer("Upload only .xlsx, .csv, or .txt stock files.")
+        return
+
+    buffer = BytesIO()
+    await message.bot.download(document, destination=buffer)
+    try:
+        lines = parse_stock_file(file_name, buffer.getvalue())
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+
+    if not lines:
+        await message.answer("No stock lines found in this file.")
+        return
+
+    data = await state.get_data()
+    count = await add_stock(session, int(data["product_id"]), lines)
+    await state.clear()
+    await message.answer(
+        f"Uploaded {file_name} and added {count} stock item(s).",
+        reply_markup=admin_menu(),
     )
 
 
 @router.message(StockForm.payload)
 async def stock_payload(message: Message, state: FSMContext, session: AsyncSession) -> None:
     if not is_admin(message.from_user.id):
+        return
+    if not message.text:
+        await message.answer("Send stock text or upload a .xlsx/.csv/.txt file.")
         return
     data = await state.get_data()
     count = await add_stock(session, int(data["product_id"]), message.text.splitlines())
