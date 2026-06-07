@@ -156,7 +156,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(StateFilter("*"), F.text.in_({"Admin Panel", "ADMIN PANEL"}))
+@router.message(StateFilter("*"), F.text.in_({"Admin Panel", "ADMIN PANEL", "⚙️ Admin Panel"}))
 async def admin_panel_text(message: Message, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -187,7 +187,7 @@ async def stats(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
-@router.message(StateFilter("*"), F.text.in_({"Stats", "STATS"}))
+@router.message(StateFilter("*"), F.text.in_({"Stats", "STATS", "📊 Stats"}))
 async def stats_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -225,7 +225,7 @@ async def admin_products(callback: CallbackQuery, session: AsyncSession) -> None
     await callback.answer()
 
 
-@router.message(StateFilter("*"), F.text.in_({"Products", "PRODUCTS"}))
+@router.message(StateFilter("*"), F.text.in_({"Products", "PRODUCTS", "📦 Products"}))
 async def admin_products_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -297,7 +297,7 @@ async def admin_product_detail(callback: CallbackQuery, session: AsyncSession) -
     await callback.answer()
 
 
-@router.message(StateFilter("*"), F.text.in_({"Add Product", "ADD PRODUCT"}))
+@router.message(StateFilter("*"), F.text.in_({"Add Product", "ADD PRODUCT", "➕ Add Product"}))
 async def add_product_start_text(message: Message, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -325,7 +325,7 @@ async def add_product_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(StateFilter("*"), F.text.in_({"Add Stock", "ADD STOCK"}))
+@router.message(StateFilter("*"), F.text.in_({"Add Stock", "ADD STOCK", "📥 Add Stock"}))
 async def add_stock_start_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -380,13 +380,17 @@ async def add_stock_start(callback: CallbackQuery, state: FSMContext, session: A
     await callback.answer()
 
 
-@router.message(StateFilter("*"), F.text.func(lambda text: text.startswith(("Add Stock #", "ADD STOCK #"))))
+@router.message(StateFilter("*"), F.text.func(lambda text: text.startswith(("Add Stock #", "ADD STOCK #", "📥 Add Stock #"))))
 async def add_stock_for_product_text(message: Message, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    product_id = _id_from_hash_button(message.text, "Add Stock #") or _id_from_hash_button(message.text, "ADD STOCK #")
+    product_id = (
+        _id_from_hash_button(message.text, "Add Stock #")
+        or _id_from_hash_button(message.text, "ADD STOCK #")
+        or _id_from_hash_button(message.text, "📥 Add Stock #")
+    )
     if not product_id:
         await message.answer("Invalid product action.")
         return
@@ -398,7 +402,7 @@ async def add_stock_for_product_text(message: Message, state: FSMContext) -> Non
     )
 
 
-@router.message(StateFilter("*"), F.text.in_({"Deposits", "DEPOSITS"}))
+@router.message(StateFilter("*"), F.text.in_({"Deposits", "DEPOSITS", "💳 Deposits"}))
 async def deposits_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -430,7 +434,7 @@ async def add_stock_for_product(callback: CallbackQuery, state: FSMContext) -> N
     await callback.answer()
 
 
-@router.message(StateFilter("*"), F.text.in_({"Coupons", "COUPONS"}))
+@router.message(StateFilter("*"), F.text.in_({"Coupons", "COUPONS", "🏷 Coupons"}))
 async def add_coupon_start_text(message: Message, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -539,6 +543,10 @@ async def admin_toggle(callback: CallbackQuery, session: AsyncSession) -> None:
                 "DISABLE PRODUCT #",
                 "DELETE PRODUCT #",
                 "CANCEL PRODUCT #",
+                "🔄 Enable Product #",
+                "🔄 Disable Product #",
+                "🗑 Delete Product #",
+                "↩️ Cancel Product #",
             )
         )
     ),
@@ -549,11 +557,15 @@ async def toggle_or_delete_product_text(message: Message, session: AsyncSession,
         await message.answer("You are not authorized.")
         return
 
-    if message.text.startswith(("Enable Product #", "Disable Product #", "ENABLE PRODUCT #", "DISABLE PRODUCT #")):
+    if message.text.startswith(
+        ("Enable Product #", "Disable Product #", "ENABLE PRODUCT #", "DISABLE PRODUCT #", "🔄 Enable Product #", "🔄 Disable Product #")
+    ):
         product_id = _id_from_hash_button(message.text, "Enable Product #") or _id_from_hash_button(
             message.text, "Disable Product #"
         ) or _id_from_hash_button(message.text, "ENABLE PRODUCT #") or _id_from_hash_button(
             message.text, "DISABLE PRODUCT #"
+        ) or _id_from_hash_button(message.text, "🔄 Enable Product #") or _id_from_hash_button(
+            message.text, "🔄 Disable Product #"
         )
         if not product_id:
             await message.answer("Invalid product action.")
@@ -568,9 +580,11 @@ async def toggle_or_delete_product_text(message: Message, session: AsyncSession,
         )
         return
 
-    if message.text.startswith(("Delete Product #", "DELETE PRODUCT #")):
+    if message.text.startswith(("Delete Product #", "DELETE PRODUCT #", "🗑 Delete Product #")):
         product_id = _id_from_hash_button(message.text, "Delete Product #") or _id_from_hash_button(
             message.text, "DELETE PRODUCT #"
+        ) or _id_from_hash_button(
+            message.text, "🗑 Delete Product #"
         )
         if not product_id:
             await message.answer("Invalid product action.")
@@ -582,7 +596,7 @@ async def toggle_or_delete_product_text(message: Message, session: AsyncSession,
         )
         return
 
-    if message.text.startswith(("Cancel Product #", "CANCEL PRODUCT #")):
+    if message.text.startswith(("Cancel Product #", "CANCEL PRODUCT #", "↩️ Cancel Product #")):
         await message.answer("Cancelled.", reply_markup=admin_reply_menu())
 
 
@@ -615,7 +629,10 @@ async def admin_delete_product_finish(callback: CallbackQuery, session: AsyncSes
     await callback.answer()
 
 
-@router.message(StateFilter("*"), F.text.func(lambda text: text.startswith(("Confirm Delete Product #", "CONFIRM DELETE PRODUCT #"))))
+@router.message(
+    StateFilter("*"),
+    F.text.func(lambda text: text.startswith(("Confirm Delete Product #", "CONFIRM DELETE PRODUCT #", "✅ Confirm Delete Product #"))),
+)
 async def admin_delete_product_finish_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -623,6 +640,8 @@ async def admin_delete_product_finish_text(message: Message, session: AsyncSessi
         return
     product_id = _id_from_hash_button(message.text, "Confirm Delete Product #") or _id_from_hash_button(
         message.text, "CONFIRM DELETE PRODUCT #"
+    ) or _id_from_hash_button(
+        message.text, "✅ Confirm Delete Product #"
     )
     if not product_id:
         await message.answer("Invalid product action.")
@@ -681,15 +700,23 @@ async def review_deposit_callback(callback: CallbackQuery, session: AsyncSession
 
 @router.message(
     StateFilter("*"),
-    F.text.func(lambda text: text.startswith(("Approve Deposit #", "Reject Deposit #", "APPROVE DEPOSIT #", "REJECT DEPOSIT #"))),
+    F.text.func(
+        lambda text: text.startswith(
+            ("Approve Deposit #", "Reject Deposit #", "APPROVE DEPOSIT #", "REJECT DEPOSIT #", "✅ Approve Deposit #", "❌ Reject Deposit #")
+        )
+    ),
 )
 async def review_deposit_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    approve = message.text.startswith(("Approve Deposit #", "APPROVE DEPOSIT #"))
-    prefixes = ("Approve Deposit #", "APPROVE DEPOSIT #") if approve else ("Reject Deposit #", "REJECT DEPOSIT #")
+    approve = message.text.startswith(("Approve Deposit #", "APPROVE DEPOSIT #", "✅ Approve Deposit #"))
+    prefixes = (
+        ("Approve Deposit #", "APPROVE DEPOSIT #", "✅ Approve Deposit #")
+        if approve
+        else ("Reject Deposit #", "REJECT DEPOSIT #", "❌ Reject Deposit #")
+    )
     deposit_id = None
     for prefix in prefixes:
         deposit_id = _id_from_hash_button(message.text, prefix)

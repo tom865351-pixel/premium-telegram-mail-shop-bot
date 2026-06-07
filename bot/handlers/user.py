@@ -22,54 +22,83 @@ from bot.utils.ui import panel
 router = Router()
 
 RESERVED_REPLY_TEXTS = {
+    "🏠 Main Menu",
     "MAIN MENU",
     "Main Menu",
+    "🛍 Shop Now",
     "MAIL SHOP",
     "Shop",
+    "💳 Deposit",
     "ADD BALANCE",
     "Deposit",
+    "👤 Profile",
     "MY PROFILE",
     "Profile",
+    "🎁 Refer",
     "REFERRAL",
     "Referral",
+    "🏷 Coupon",
     "COUPON",
     "Coupon",
+    "📦 Orders",
     "MY ORDERS",
     "Orders",
+    "☎️ Support",
     "SUPPORT",
     "Support",
+    "⚙️ Admin Panel",
     "ADMIN PANEL",
     "Admin Panel",
+    "📦 Products",
     "PRODUCTS",
     "Products",
+    "➕ Add Product",
     "ADD PRODUCT",
     "Add Product",
+    "📥 Add Stock",
     "ADD STOCK",
     "Add Stock",
+    "💳 Deposits",
     "DEPOSITS",
     "Deposits",
+    "🏷 Coupons",
     "COUPONS",
     "Coupons",
+    "📊 Stats",
     "STATS",
     "Stats",
+    "🟡 Binance",
     "Binance",
+    "💵 USDT TRC20",
     "USDT TRC20",
+    "💵 USDT BEP20",
     "USDT BEP20",
+    "📱 bKash",
     "bKash",
+    "📱 Nagad",
     "Nagad",
+    "🚀 Rocket",
     "Rocket",
+    "🛒 Single Buy",
     "BUY 1 ACCOUNT",
     "Single Buy",
+    "📦 Bulk Buy",
     "BULK BUY",
     "Bulk Buy",
 }
 
 DEPOSIT_METHOD_TEXTS = {
+    "🟡 Binance": "binance",
     "Binance": "binance",
+    "💵 USDT TRC20": "usdt_trc20",
     "USDT TRC20": "usdt_trc20",
+    "💵 USDT BEP20": "usdt_bep20",
     "USDT BEP20": "usdt_bep20",
+    "📱 bKash": "bkash",
     "bKash": "bkash",
+    "📱 Nagad": "nagad",
     "Nagad": "nagad",
+    "🚀 Rocket": "rocket",
     "Rocket": "rocket",
 }
 
@@ -83,20 +112,35 @@ DEPOSIT_METHOD_LABELS = {
 }
 
 MENU_ALIASES = {
+    "🏠 Main Menu": "Main Menu",
     "MAIN MENU": "Main Menu",
+    "🛍 Shop Now": "Shop",
     "MAIL SHOP": "Shop",
+    "💳 Deposit": "Deposit",
     "ADD BALANCE": "Deposit",
+    "👤 Profile": "Profile",
     "MY PROFILE": "Profile",
+    "📦 Orders": "Orders",
     "MY ORDERS": "Orders",
+    "🎁 Refer": "Referral",
     "REFERRAL": "Referral",
+    "🏷 Coupon": "Coupon",
     "COUPON": "Coupon",
+    "☎️ Support": "Support",
     "SUPPORT": "Support",
+    "⚙️ Admin Panel": "Admin Panel",
     "ADMIN PANEL": "Admin Panel",
+    "📦 Products": "Products",
     "PRODUCTS": "Products",
+    "➕ Add Product": "Add Product",
     "ADD PRODUCT": "Add Product",
+    "📥 Add Stock": "Add Stock",
     "ADD STOCK": "Add Stock",
+    "💳 Deposits": "Deposits",
     "DEPOSITS": "Deposits",
+    "🏷 Coupons": "Coupons",
     "COUPONS": "Coupons",
+    "📊 Stats": "Stats",
     "STATS": "Stats",
 }
 ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats"}
@@ -119,6 +163,15 @@ GLOBAL_MENU_TEXTS = {
     "COUPON",
     "SUPPORT",
     "ADMIN PANEL",
+    "🏠 Main Menu",
+    "🛍 Shop Now",
+    "💳 Deposit",
+    "👤 Profile",
+    "📦 Orders",
+    "🎁 Refer",
+    "🏷 Coupon",
+    "☎️ Support",
+    "⚙️ Admin Panel",
 }
 
 
@@ -443,7 +496,7 @@ async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer("Delivered.")
 
 
-@router.message(StateFilter(None), F.text.in_({"Single Buy", "BUY 1 ACCOUNT"}))
+@router.message(StateFilter(None), F.text.in_({"Single Buy", "BUY 1 ACCOUNT", "🛒 Single Buy"}))
 async def buy_product_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
     product_id = data.get("selected_product_id")
@@ -474,7 +527,7 @@ async def bulk_buy_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(StateFilter(None), F.text.in_({"Bulk Buy", "BULK BUY"}))
+@router.message(StateFilter(None), F.text.in_({"Bulk Buy", "BULK BUY", "📦 Bulk Buy"}))
 async def bulk_buy_start_text(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     product_id = data.get("selected_product_id")
