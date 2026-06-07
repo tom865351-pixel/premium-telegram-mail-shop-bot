@@ -143,6 +143,21 @@ async def _deposit_details_text(session: AsyncSession, deposit: object, queue_si
     )
 
 
+async def _send_next_deposit_after_review(message: Message, session: AsyncSession, deposit: object) -> None:
+    await message.answer(
+        f"Deposit Reviewed\n\nRequest ID: #{deposit.id}\nStatus: {deposit.status.value}\nAmount: {money(deposit.amount)}"
+    )
+    rows = await pending_deposits(session)
+    if not rows:
+        await message.answer("Deposits\n\nNo pending deposit requests.", reply_markup=admin_reply_menu())
+        return
+    first = rows[0]
+    await message.answer(
+        await _deposit_details_text(session, first, len(rows)),
+        reply_markup=deposit_review_reply_menu(first.id),
+    )
+
+
 def _looks_like_header(values: list[str]) -> bool:
     header_words = {"email", "mail", "username", "user", "password", "pass", "account", "accounts"}
     lowered = {value.strip().lower() for value in values if value.strip()}
@@ -768,7 +783,7 @@ async def review_deposit_callback(callback: CallbackQuery, session: AsyncSession
         except Exception:
             pass
     await callback.message.edit_text(f"Deposit #{deposit.id} {deposit.status.value}.")
-    await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
+    await _send_next_deposit_after_review(callback.message, session, deposit)
     await callback.answer()
 
 
@@ -806,10 +821,7 @@ async def review_deposit_text(message: Message, session: AsyncSession, state: FS
             )
         except Exception:
             pass
-    await message.answer(
-        f"Deposit Reviewed\n\nRequest ID: #{deposit.id}\nStatus: {deposit.status.value}\nAmount: {money(deposit.amount)}",
-        reply_markup=admin_reply_menu(),
-    )
+    await _send_next_deposit_after_review(message, session, deposit)
 
 
 @router.callback_query(F.data == "admin_add_coupon")
