@@ -12,6 +12,7 @@ async def create_deposit(
     amount: float,
     method: str,
     transaction_id: str,
+    proof_file_id: str | None = None,
     status: DepositStatus = DepositStatus.PENDING,
 ) -> Deposit:
     deposit = Deposit(
@@ -19,6 +20,7 @@ async def create_deposit(
         amount=amount,
         method=method,
         transaction_id=transaction_id.strip(),
+        proof_file_id=proof_file_id,
         status=status,
     )
     if status == DepositStatus.APPROVED:

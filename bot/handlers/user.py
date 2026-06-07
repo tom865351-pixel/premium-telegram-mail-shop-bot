@@ -208,6 +208,7 @@ ADMIN_ACTION_PREFIXES = (
 class DepositForm(StatesGroup):
     amount = State()
     transaction_id = State()
+    screenshot = State()
 
 
 class CouponForm(StatesGroup):
@@ -267,6 +268,7 @@ def deposit_admin_text(
         f"Amount: {money(deposit.amount)}\n"
         f"Method: {method}\n"
         f"Transaction ID: <code>{deposit.transaction_id}</code>\n\n"
+        f"Screenshot: {'Attached below' if getattr(deposit, 'proof_file_id', None) else 'Not provided'}\n\n"
         "Customer\n"
         f"Name: {user.first_name or 'Unknown'}\n"
         f"Username: @{user.username if user.username else 'not_available'}\n"
@@ -805,8 +807,6 @@ async def deposit_amount(message: Message, state: FSMContext) -> None:
 
 @router.message(DepositForm.transaction_id)
 async def deposit_transaction(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    data = await state.get_data()
-    user = await get_or_create_user(session, message.from_user)
     txid = message.text.strip()
     if len(txid) < 4:
         await message.answer("Transaction ID is too short. Please send a valid transaction ID/reference.")
@@ -820,27 +820,59 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
         )
         return
 
+    await state.update_data(transaction_id=txid)
+    await state.set_state(DepositForm.screenshot)
+    await message.answer(
+        "Payment Screenshot Required\n\n"
+        "Now upload the payment screenshot.\n\n"
+        "Admin will match your amount, transaction ID, and screenshot before approval."
+    )
+
+
+@router.message(DepositForm.screenshot)
+async def deposit_screenshot(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not message.photo:
+        await message.answer("Please upload a payment screenshot as a photo.")
+        return
+
+    data = await state.get_data()
+    user = await get_or_create_user(session, message.from_user)
     settings = get_settings()
     amount = float(data["amount"])
+    txid = data["transaction_id"]
     auto_approved, review_reason = await semi_auto_deposit_decision(session, user, amount, txid)
+    if auto_approved:
+        review_reason = f"{review_reason} Screenshot proof attached."
+    else:
+        review_reason = f"{review_reason} Screenshot proof attached for admin matching."
+    proof_file_id = message.photo[-1].file_id
     deposit = await create_deposit(
         session=session,
         user_id=user.id,
         amount=amount,
         method=data["method"],
         transaction_id=txid,
+        proof_file_id=proof_file_id,
         status=DepositStatus.APPROVED if auto_approved else DepositStatus.PENDING,
     )
     await state.clear()
     for admin_id in settings.admin_ids:
         try:
-            await message.bot.send_message(
+            await message.bot.send_photo(
                 admin_id,
-                deposit_admin_text(deposit, user, auto_approved=auto_approved, review_reason=review_reason),
+                photo=proof_file_id,
+                caption=deposit_admin_text(deposit, user, auto_approved=auto_approved, review_reason=review_reason),
                 reply_markup=None if auto_approved else deposit_review_reply_menu(deposit.id),
             )
         except Exception:
-            pass
+            try:
+                await message.bot.send_message(
+                    admin_id,
+                    deposit_admin_text(deposit, user, auto_approved=auto_approved, review_reason=review_reason),
+                    reply_markup=None if auto_approved else deposit_review_reply_menu(deposit.id),
+                )
+            except Exception:
+                pass
     if auto_approved:
         await message.answer(
             "Deposit Approved\n\n"

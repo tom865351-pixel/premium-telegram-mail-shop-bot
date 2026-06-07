@@ -86,6 +86,7 @@ class Deposit(Base):
     amount: Mapped[float] = mapped_column(Numeric(12, 2))
     method: Mapped[str] = mapped_column(String(64))
     transaction_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    proof_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[DepositStatus] = mapped_column(Enum(DepositStatus), default=DepositStatus.PENDING, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

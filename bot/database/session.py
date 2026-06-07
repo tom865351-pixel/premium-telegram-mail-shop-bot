@@ -16,6 +16,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_restricted BOOLEAN NOT NULL DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE deposits ADD COLUMN IF NOT EXISTS proof_file_id VARCHAR(255)"))
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
