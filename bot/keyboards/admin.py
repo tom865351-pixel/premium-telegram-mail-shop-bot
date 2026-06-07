@@ -6,12 +6,29 @@ def admin_reply_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📦 Products"), KeyboardButton(text="➕ Add Product")],
             [KeyboardButton(text="📥 Add Stock"), KeyboardButton(text="💳 Deposits")],
-            [KeyboardButton(text="🏷 Coupons"), KeyboardButton(text="📊 Stats")],
+            [KeyboardButton(text="👥 Members"), KeyboardButton(text="🏷 Coupons")],
+            [KeyboardButton(text="📊 Stats")],
             [KeyboardButton(text="🏠 Main Menu")],
         ],
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Select admin action",
+    )
+
+
+def member_actions_reply_menu(user_id: int, is_banned: bool, is_restricted: bool) -> ReplyKeyboardMarkup:
+    ban_label = "Unban" if is_banned else "Ban"
+    restrict_label = "Unrestrict" if is_restricted else "Restrict"
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=f"💰 Add Balance #{user_id}"), KeyboardButton(text=f"➖ Remove Balance #{user_id}")],
+            [KeyboardButton(text=f"🧾 Check Orders #{user_id}"), KeyboardButton(text=f"💳 Check Balance #{user_id}")],
+            [KeyboardButton(text=f"🚫 {ban_label} Member #{user_id}"), KeyboardButton(text=f"🔒 {restrict_label} Member #{user_id}")],
+            [KeyboardButton(text="👥 Members"), KeyboardButton(text="⚙️ Admin Panel")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Select member action",
     )
 
 

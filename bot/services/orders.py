@@ -9,6 +9,11 @@ from bot.services.products import reserve_stock_item, reserve_stock_items
 
 
 async def purchase_product(session: AsyncSession, user: User, product_id: int) -> tuple[bool, str, StockItem | None]:
+    if getattr(user, "is_banned", False):
+        return False, "Your account is banned. Please contact support.", None
+    if getattr(user, "is_restricted", False):
+        return False, "Your account is restricted. Please contact support.", None
+
     product = await session.get(Product, product_id)
     if not product or not product.is_active:
         return False, "Product is unavailable.", None
@@ -53,6 +58,11 @@ async def purchase_product_bulk(
     product_id: int,
     quantity: int,
 ) -> tuple[bool, str, list[StockItem]]:
+    if getattr(user, "is_banned", False):
+        return False, "Your account is banned. Please contact support.", []
+    if getattr(user, "is_restricted", False):
+        return False, "Your account is restricted. Please contact support.", []
+
     if quantity < 2:
         return False, "Bulk buy quantity must be at least 2.", []
 

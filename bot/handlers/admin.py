@@ -16,12 +16,14 @@ from bot.keyboards.admin import (
     admin_products_reply_menu,
     delete_product_confirm_reply_menu,
     deposit_review_reply_menu,
+    member_actions_reply_menu,
     product_admin_actions_reply_menu,
 )
 from bot.services.coupons import create_coupon
 from bot.services.deposits import pending_deposits, review_deposit
 from bot.services.products import add_stock, create_product, delete_product, list_all_products, toggle_product, update_product
 from bot.services.stats import admin_stats
+from bot.services.users import adjust_user_balance, find_user, set_user_banned, set_user_restricted
 from bot.utils.formatting import money
 
 router = Router()
@@ -44,6 +46,14 @@ class StockForm(StatesGroup):
 
 class CouponAdminForm(StatesGroup):
     details = State()
+
+
+class MemberLookupForm(StatesGroup):
+    query = State()
+
+
+class MemberBalanceForm(StatesGroup):
+    amount = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -94,6 +104,44 @@ def _is_deposit_review(text: str) -> bool:
 
 def _is_deposit_approve(text: str) -> bool:
     return _starts_with_any(text, ("Approve Deposit #",))
+
+
+def _is_member_action(text: str) -> bool:
+    return _starts_with_any(
+        text,
+        (
+            "Add Balance #",
+            "Remove Balance #",
+            "Check Orders #",
+            "Check Balance #",
+            "Ban Member #",
+            "Unban Member #",
+            "Restrict Member #",
+            "Unrestrict Member #",
+        ),
+    )
+
+
+def _member_status(user: object) -> str:
+    flags = []
+    if getattr(user, "is_banned", False):
+        flags.append("Banned")
+    if getattr(user, "is_restricted", False):
+        flags.append("Restricted")
+    return ", ".join(flags) if flags else "Normal"
+
+
+def _member_text(user: object) -> str:
+    username = f"@{user.username}" if user.username else "not_available"
+    return (
+        "Member Details\n\n"
+        f"Database ID: #{user.id}\n"
+        f"Name: {user.first_name or 'Unknown'}\n"
+        f"Username: {username}\n"
+        f"Telegram ID: <code>{user.telegram_id}</code>\n"
+        f"Balance: {money(user.balance)}\n"
+        f"Status: {_member_status(user)}"
+    )
 
 
 def _id_from_hash_button(text: str, prefix: str) -> int | None:
@@ -270,6 +318,155 @@ async def stats_text(message: Message, session: AsyncSession, state: FSMContext)
         f"Revenue: {money(data['revenue'])}\n"
         f"Pending deposits: {data['pending_deposits']}",
         reply_markup=admin_reply_menu(),
+    )
+
+
+@router.message(StateFilter("*"), F.text.in_({"Members", "MEMBERS", "👥 Members"}))
+async def members_start_text(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    await state.set_state(MemberLookupForm.query)
+    await message.answer(
+        "Member Management\n\n"
+        "Send member Telegram ID or username.\n\n"
+        "Example:\n"
+        "7562995992\n"
+        "@username"
+    )
+
+
+@router.message(MemberLookupForm.query)
+async def member_lookup_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    user = await find_user(session, message.text)
+    await state.clear()
+    if not user:
+        await message.answer("Member not found.", reply_markup=admin_reply_menu())
+        return
+    await message.answer(
+        _member_text(user),
+        reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
+    )
+
+
+@router.message(StateFilter("*"), F.text.func(_is_member_action))
+async def member_action_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+
+    action_text = _button_text(message.text)
+    user_id = None
+    for prefix in (
+        "Add Balance #",
+        "Remove Balance #",
+        "Check Orders #",
+        "Check Balance #",
+        "Ban Member #",
+        "Unban Member #",
+        "Restrict Member #",
+        "Unrestrict Member #",
+    ):
+        user_id = _id_from_hash_button(message.text, prefix)
+        if user_id:
+            break
+    if not user_id:
+        await message.answer("Invalid member action.", reply_markup=admin_reply_menu())
+        return
+
+    from bot.database.models import User
+
+    user = await session.get(User, user_id)
+    if not user:
+        await message.answer("Member not found.", reply_markup=admin_reply_menu())
+        return
+    if user.telegram_id in get_settings().admin_ids and (
+        action_text.startswith("Ban Member #")
+        or action_text.startswith("Restrict Member #")
+    ):
+        await message.answer("Admin accounts cannot be banned or restricted.", reply_markup=admin_reply_menu())
+        return
+
+    if action_text.startswith("Add Balance #") or action_text.startswith("Remove Balance #"):
+        action = "add" if action_text.startswith("Add Balance #") else "remove"
+        await state.update_data(member_id=user.id, balance_action=action)
+        await state.set_state(MemberBalanceForm.amount)
+        await message.answer(
+            f"{'Add' if action == 'add' else 'Remove'} Balance\n\n"
+            f"Member: {user.first_name or user.telegram_id}\n"
+            f"Current Balance: {money(user.balance)}\n\n"
+            "Send amount."
+        )
+        return
+
+    if action_text.startswith("Check Balance #"):
+        await message.answer(
+            _member_text(user),
+            reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
+        )
+        return
+
+    if action_text.startswith("Check Orders #"):
+        from bot.services.orders import recent_orders
+
+        orders = await recent_orders(session, user.id, limit=10)
+        if not orders:
+            text = "Member Orders\n\nNo orders found."
+        else:
+            text = "Member Orders\n\n" + "\n".join(
+                f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}"
+                for order in orders
+            )
+        await message.answer(text, reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted))
+        return
+
+    if action_text.startswith("Ban Member #") or action_text.startswith("Unban Member #"):
+        banned = action_text.startswith("Ban Member #")
+        user = await set_user_banned(session, user.id, banned)
+        await message.answer(
+            f"Member {'Banned' if banned else 'Unbanned'}\n\n{_member_text(user)}",
+            reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
+        )
+        return
+
+    if action_text.startswith("Restrict Member #") or action_text.startswith("Unrestrict Member #"):
+        restricted = action_text.startswith("Restrict Member #")
+        user = await set_user_restricted(session, user.id, restricted)
+        await message.answer(
+            f"Member {'Restricted' if restricted else 'Unrestricted'}\n\n{_member_text(user)}",
+            reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
+        )
+
+
+@router.message(MemberBalanceForm.amount)
+async def member_balance_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        amount = float(message.text)
+    except (TypeError, ValueError):
+        await message.answer("Please send a valid numeric amount.")
+        return
+    if amount <= 0:
+        await message.answer("Amount must be greater than 0.")
+        return
+
+    data = await state.get_data()
+    signed_amount = amount if data["balance_action"] == "add" else -amount
+    user = await adjust_user_balance(session, int(data["member_id"]), signed_amount)
+    await state.clear()
+    if not user:
+        await message.answer("Member not found.", reply_markup=admin_reply_menu())
+        return
+    await message.answer(
+        f"Balance Updated\n\n"
+        f"Member: {user.first_name or user.telegram_id}\n"
+        f"New Balance: {money(user.balance)}",
+        reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
     )
 
 

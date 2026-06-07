@@ -40,3 +40,44 @@ async def get_or_create_user(
 
 async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> User | None:
     return await session.scalar(select(User).where(User.telegram_id == telegram_id))
+
+
+async def find_user(session: AsyncSession, query: str) -> User | None:
+    clean = query.strip()
+    if clean.startswith("@"):
+        clean = clean[1:]
+    if clean.isdigit():
+        return await get_user_by_telegram_id(session, int(clean))
+    return await session.scalar(select(User).where(User.username.ilike(clean)))
+
+
+async def adjust_user_balance(session: AsyncSession, user_id: int, amount: float) -> User | None:
+    user = await session.get(User, user_id)
+    if not user:
+        return None
+    user.balance = round(float(user.balance) + amount, 2)
+    if float(user.balance) < 0:
+        user.balance = 0
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def set_user_banned(session: AsyncSession, user_id: int, banned: bool) -> User | None:
+    user = await session.get(User, user_id)
+    if not user:
+        return None
+    user.is_banned = banned
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def set_user_restricted(session: AsyncSession, user_id: int, restricted: bool) -> User | None:
+    user = await session.get(User, user_id)
+    if not user:
+        return None
+    user.is_restricted = restricted
+    await session.commit()
+    await session.refresh(user)
+    return user

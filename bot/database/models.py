@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.database.base import Base
@@ -26,6 +26,8 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     balance: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_restricted: Mapped[bool] = mapped_column(Boolean, default=False)
     referral_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     referred_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

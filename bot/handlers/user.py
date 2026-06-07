@@ -69,6 +69,8 @@ RESERVED_REPLY_TEXTS = {
     "📊 Stats",
     "STATS",
     "Stats",
+    "👥 Members",
+    "Members",
     "🟡 Binance",
     "Binance",
     "💵 USDT TRC20",
@@ -145,7 +147,7 @@ MENU_ALIASES = {
     "📊 Stats": "Stats",
     "STATS": "Stats",
 }
-ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats"}
+ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats", "Members"}
 GLOBAL_MENU_TEXTS = {
     "Main Menu",
     "Shop",
@@ -180,6 +182,14 @@ ADMIN_ACTION_PREFIXES = (
     "Product #",
     "Add Stock #",
     "Edit Product #",
+    "Add Balance #",
+    "Remove Balance #",
+    "Check Orders #",
+    "Check Balance #",
+    "Ban Member #",
+    "Unban Member #",
+    "Restrict Member #",
+    "Unrestrict Member #",
     "Enable Product #",
     "Disable Product #",
     "Delete Product #",
@@ -298,6 +308,14 @@ def is_admin_action_text(text: str) -> bool:
     )
 
 
+def account_block_text(user: object, action: str = "use this feature") -> str | None:
+    if getattr(user, "is_banned", False):
+        return "Your account is banned. Please contact support."
+    if getattr(user, "is_restricted", False):
+        return f"Your account is restricted. You cannot {action}. Please contact support."
+    return None
+
+
 def suspicious_txid_reason(txid: str) -> str | None:
     normalized = txid.strip().lower().replace(" ", "")
     suspicious_words = ("test", "fake", "demo", "txid", "trxid")
@@ -360,6 +378,9 @@ async def profile_text(session: AsyncSession, user: object) -> str:
 async def send_menu(message: Message, session: AsyncSession, referral_code: str | None = None) -> None:
     settings = get_settings()
     user = await get_or_create_user(session, message.from_user, referral_code)
+    if user.is_banned and message.from_user.id not in settings.admin_ids:
+        await message.answer("Your account is banned. Please contact support.")
+        return
     text = await profile_text(session, user)
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
 
@@ -375,6 +396,21 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
     settings = get_settings()
     user = await get_or_create_user(session, message.from_user)
     selected = MENU_ALIASES.get(message.text, message.text)
+    if user.is_banned and message.from_user.id not in settings.admin_ids:
+        await message.answer("Your account is banned. Please contact support.")
+        return
+    restricted_actions = {
+        "Shop": "shop",
+        "Deposit": "deposit",
+        "Coupon": "redeem coupons",
+        "Referral": "use referral",
+        "Orders": "view orders",
+    }
+    if selected in restricted_actions:
+        block_text = account_block_text(user, restricted_actions[selected])
+        if block_text:
+            await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+            return
 
     if selected == "Main Menu":
         await message.answer(
@@ -552,6 +588,12 @@ async def send_product_detail_message(
     state: FSMContext,
     product_name: str,
 ) -> bool:
+    user = await get_or_create_user(session, message.from_user)
+    block_text = account_block_text(user, "shop")
+    if block_text:
+        await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        return True
+
     product_name = clean_button_text(product_name)
     product_rows = await list_active_products(session)
     product_row = next((row for row in product_rows if row[0].name.lower() == product_name.lower()), None)
@@ -707,7 +749,12 @@ async def deposit_method(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(StateFilter(None), F.text.in_(DEPOSIT_METHOD_TEXTS.keys()))
-async def deposit_method_text(message: Message, state: FSMContext) -> None:
+async def deposit_method_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    user = await get_or_create_user(session, message.from_user)
+    block_text = account_block_text(user, "deposit")
+    if block_text:
+        await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        return
     method = DEPOSIT_METHOD_TEXTS[message.text]
     await state.update_data(method=method)
     await state.set_state(DepositForm.amount)
