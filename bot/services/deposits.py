@@ -68,6 +68,16 @@ async def pending_deposits(session: AsyncSession, limit: int = 20) -> list[Depos
     return list(result.scalars().all())
 
 
+async def recent_deposits(session: AsyncSession, user_id: int, limit: int = 10) -> list[Deposit]:
+    result = await session.execute(
+        select(Deposit)
+        .where(Deposit.user_id == user_id)
+        .order_by(Deposit.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def review_deposit(session: AsyncSession, deposit_id: int, approve: bool) -> Deposit | None:
     deposit = await session.get(Deposit, deposit_id)
     if not deposit or deposit.status != DepositStatus.PENDING:

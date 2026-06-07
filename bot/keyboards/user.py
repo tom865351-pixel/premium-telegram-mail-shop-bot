@@ -5,6 +5,7 @@ def main_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="🛍 Shop Now"), KeyboardButton(text="💳 Deposit")],
         [KeyboardButton(text="👤 Profile"), KeyboardButton(text="📦 Orders")],
+        [KeyboardButton(text="🧾 Deposit Status")],
         [KeyboardButton(text="🎁 Refer"), KeyboardButton(text="🏷 Coupon")],
         [KeyboardButton(text="☎️ Support")],
     ]

@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     ocr_enabled: bool = Field(default=True, alias="OCR_ENABLED")
     ocr_space_api_key: str = Field(default="helloworld", alias="OCR_SPACE_API_KEY")
     ocr_space_api_url: str = Field(default="https://api.ocr.space/parse/image", alias="OCR_SPACE_API_URL")
+    low_stock_alert_threshold: int = Field(default=5, alias="LOW_STOCK_ALERT_THRESHOLD")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -20,8 +20,9 @@ def admin_reply_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📦 Products"), KeyboardButton(text="➕ Add Product")],
             [KeyboardButton(text="📥 Add Stock"), KeyboardButton(text="💳 Deposits")],
-            [KeyboardButton(text="👥 Members"), KeyboardButton(text="🏷 Coupons")],
-            [KeyboardButton(text="📊 Stats")],
+            [KeyboardButton(text="👥 Members"), KeyboardButton(text="📋 All Members")],
+            [KeyboardButton(text="📣 Broadcast"), KeyboardButton(text="📈 Reports")],
+            [KeyboardButton(text="🏷 Coupons"), KeyboardButton(text="📊 Stats")],
             [KeyboardButton(text="🏠 Main Menu")],
         ],
         resize_keyboard=True,
@@ -37,6 +38,7 @@ def member_actions_reply_menu(user_id: int, is_banned: bool, is_restricted: bool
         keyboard=[
             [KeyboardButton(text=f"💰 Add Balance #{user_id}"), KeyboardButton(text=f"➖ Remove Balance #{user_id}")],
             [KeyboardButton(text=f"🧾 Check Orders #{user_id}"), KeyboardButton(text=f"💳 Check Balance #{user_id}")],
+            [KeyboardButton(text=f"📝 Note Member #{user_id}")],
             [KeyboardButton(text=f"🚫 {ban_label} Member #{user_id}"), KeyboardButton(text=f"🔒 {restrict_label} Member #{user_id}")],
             [KeyboardButton(text="📋 All Members"), KeyboardButton(text="👥 Members")],
             [KeyboardButton(text="⚙️ Admin Panel")],
@@ -44,6 +46,24 @@ def member_actions_reply_menu(user_id: int, is_banned: bool, is_restricted: bool
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Select member action",
+    )
+
+
+def member_orders_reply_menu(user_id: int, orders: list[object]) -> ReplyKeyboardMarkup:
+    rows = []
+    buttons = [
+        KeyboardButton(text=f"↩️ Refund Order #{order.id}")
+        for order in orders
+        if getattr(getattr(order, "status", None), "value", str(getattr(order, "status", ""))) != "refunded"
+    ]
+    for index in range(0, len(buttons), 2):
+        rows.append(buttons[index : index + 2])
+    rows.append([KeyboardButton(text=f"👤 Member #{user_id}"), KeyboardButton(text="⚙️ Admin Panel")])
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Select order action",
     )
 
 
@@ -97,4 +117,16 @@ def delete_product_confirm_reply_menu(product_id: int) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Confirm delete",
+    )
+
+
+def refund_confirm_reply_menu(order_id: int) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=f"✅ Confirm Refund Order #{order_id}")],
+            [KeyboardButton(text="⚙️ Admin Panel")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Confirm refund",
     )

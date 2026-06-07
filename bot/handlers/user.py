@@ -14,10 +14,10 @@ from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu
 from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
 from bot.services.coupons import redeem_coupon
 from bot.database.models import DepositStatus
-from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, txid_exists
+from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, recent_deposits, txid_exists
 from bot.services.ocr import analyze_payment_screenshot
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
-from bot.services.products import list_active_products
+from bot.services.products import list_active_products, unsold_stock_count
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.utils.formatting import clean_support_username, money
 from bot.utils.ui import panel
@@ -76,6 +76,12 @@ RESERVED_REPLY_TEXTS = {
     "All Members",
     "🔎 Search Member",
     "Search Member",
+    "📣 Broadcast",
+    "Broadcast",
+    "📈 Reports",
+    "Reports",
+    "🧾 Deposit Status",
+    "Deposit Status",
     "🟡 Binance",
     "Binance",
     "💵 USDT TRC20",
@@ -192,6 +198,9 @@ ADMIN_ACTION_PREFIXES = (
     "Remove Balance #",
     "Check Orders #",
     "Check Balance #",
+    "Note Member #",
+    "Refund Order #",
+    "Confirm Refund Order #",
     "Ban Member #",
     "Unban Member #",
     "Restrict Member #",
@@ -365,6 +374,23 @@ async def semi_auto_deposit_decision(
         return False, f"Daily auto limit exceeded: {money(settings.semi_auto_daily_user_limit)}."
 
     return True, "Trusted user, unique TXID, and amount limits matched."
+
+
+async def notify_low_stock_if_needed(message: Message, session: AsyncSession, product_id: int, product_name: str) -> None:
+    settings = get_settings()
+    remaining = await unsold_stock_count(session, product_id)
+    if remaining > settings.low_stock_alert_threshold:
+        return
+    for admin_id in settings.admin_ids:
+        try:
+            await message.bot.send_message(
+                admin_id,
+                "Low Stock Alert\n\n"
+                f"Product: {product_name}\n"
+                f"Remaining Stock: {remaining}",
+            )
+        except Exception:
+            pass
 
 
 async def profile_text(session: AsyncSession, user: object) -> str:
@@ -630,10 +656,14 @@ async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     await callback.message.answer(
-        "Order Completed\n\n"
-        "Account details:\n"
+        "Order Invoice\n\n"
+        f"Order ID: #{stock_item.sold_order_id}\n"
+        f"Product ID: #{product_id}\n"
+        "Status: completed\n\n"
+        "Delivered Account:\n"
         f"<code>{stock_item.payload}</code>",
     )
+    await notify_low_stock_if_needed(callback.message, session, product_id, f"#{product_id}")
     await callback.answer("Delivered.")
 
 
@@ -646,17 +676,25 @@ async def buy_product_text(message: Message, state: FSMContext, session: AsyncSe
         return
 
     user = await get_or_create_user(session, message.from_user)
+    product_rows = await list_active_products(session)
+    product_row = next((row for row in product_rows if row[0].id == int(product_id)), None)
+    product_name = product_row[0].name if product_row else f"#{product_id}"
     ok, text, stock_item = await purchase_product(session, user, int(product_id))
     if not ok:
         await message.answer(f"Purchase failed\n\n{text}", reply_markup=product_buy_reply_menu(message.from_user.id in get_settings().admin_ids))
         return
 
     await message.answer(
-        "Order Completed\n\n"
-        "Account details:\n"
+        "Order Invoice\n\n"
+        f"Order ID: #{stock_item.sold_order_id}\n"
+        f"Product: {product_name}\n"
+        f"Price: {money(product_row[0].price) if product_row else 'N/A'}\n"
+        "Status: completed\n\n"
+        "Delivered Account:\n"
         f"<code>{stock_item.payload}</code>",
         reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
     )
+    await notify_low_stock_if_needed(message, session, int(product_id), product_name)
 
 
 @router.callback_query(F.data.startswith("bulk_buy:"))
@@ -690,6 +728,9 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
 
     data = await state.get_data()
     user = await get_or_create_user(session, message.from_user)
+    product_rows = await list_active_products(session)
+    product_row = next((row for row in product_rows if row[0].id == int(data["product_id"])), None)
+    product_name = product_row[0].name if product_row else f"#{data['product_id']}"
     ok, text, stock_items = await purchase_product_bulk(session, user, int(data["product_id"]), quantity)
     if not ok:
         await message.answer(text)
@@ -699,9 +740,16 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
     delivery_file = build_bulk_delivery_file(stock_items)
     await message.answer_document(
         delivery_file,
-        caption=f"{text}\n\nDelivered {len(stock_items)} account(s) in an Excel file.",
+        caption=(
+            "Bulk Order Invoice\n\n"
+            f"Product: {product_name}\n"
+            f"Quantity: {len(stock_items)}\n"
+            f"Status: completed\n\n"
+            f"{text}\n\nDelivered {len(stock_items)} account(s) in an Excel file."
+        ),
         reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
     )
+    await notify_low_stock_if_needed(message, session, int(data["product_id"]), product_name)
 
 
 @router.callback_query(F.data == "orders")
@@ -728,6 +776,21 @@ async def orders_text(message: Message, session: AsyncSession) -> None:
     else:
         text = "Recent Orders\n\n" + "\n".join(
             f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
+        )
+    await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+
+
+@router.message(StateFilter("*"), F.text.in_({"Deposit Status", "🧾 Deposit Status"}))
+async def deposit_status_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    user = await get_or_create_user(session, message.from_user)
+    rows = await recent_deposits(session, user.id, limit=10)
+    if not rows:
+        text = "Deposit Status\n\nNo deposits found."
+    else:
+        text = "Deposit Status\n\n" + "\n".join(
+            f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - {deposit.status.value}"
+            for deposit in rows
         )
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
 

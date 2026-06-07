@@ -66,6 +66,18 @@ async def add_stock(session: AsyncSession, product_id: int, lines: list[str]) ->
     return len(clean_lines)
 
 
+async def unsold_stock_count(session: AsyncSession, product_id: int) -> int:
+    return int(
+        await session.scalar(
+            select(func.count(StockItem.id)).where(
+                StockItem.product_id == product_id,
+                StockItem.is_sold.is_(False),
+            )
+        )
+        or 0
+    )
+
+
 async def toggle_product(session: AsyncSession, product_id: int) -> Product | None:
     product = await session.get(Product, product_id)
     if not product:

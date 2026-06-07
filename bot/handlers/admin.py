@@ -17,14 +17,18 @@ from bot.keyboards.admin import (
     delete_product_confirm_reply_menu,
     deposit_review_reply_menu,
     member_actions_reply_menu,
+    member_orders_reply_menu,
     members_reply_menu,
     product_admin_actions_reply_menu,
+    refund_confirm_reply_menu,
 )
 from bot.services.coupons import create_coupon
-from bot.services.deposits import pending_deposits, review_deposit
+from bot.services.audit import log_admin_action
+from bot.services.deposits import deposited_today, pending_deposits, review_deposit
 from bot.services.products import add_stock, create_product, delete_product, list_all_products, toggle_product, update_product
 from bot.services.stats import admin_stats
-from bot.services.users import adjust_user_balance, find_user, list_recent_users, set_user_banned, set_user_restricted
+from bot.services.orders import order_count, refund_order, sales_report, total_spent
+from bot.services.users import adjust_user_balance, find_user, list_all_users, list_recent_users, set_user_banned, set_user_note, set_user_restricted
 from bot.utils.formatting import money
 
 router = Router()
@@ -55,6 +59,14 @@ class MemberLookupForm(StatesGroup):
 
 class MemberBalanceForm(StatesGroup):
     amount = State()
+
+
+class MemberNoteForm(StatesGroup):
+    note = State()
+
+
+class BroadcastForm(StatesGroup):
+    message = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -115,12 +127,21 @@ def _is_member_action(text: str) -> bool:
             "Remove Balance #",
             "Check Orders #",
             "Check Balance #",
+            "Note Member #",
             "Ban Member #",
             "Unban Member #",
             "Restrict Member #",
             "Unrestrict Member #",
         ),
     )
+
+
+def _is_refund_order(text: str) -> bool:
+    return _starts_with_any(text, ("Refund Order #",))
+
+
+def _is_refund_confirm(text: str) -> bool:
+    return _starts_with_any(text, ("Confirm Refund Order #",))
 
 
 def _is_member_selection(text: str) -> bool:
@@ -145,7 +166,21 @@ def _member_text(user: object) -> str:
         f"Username: {username}\n"
         f"Telegram ID: <code>{user.telegram_id}</code>\n"
         f"Balance: {money(user.balance)}\n"
-        f"Status: {_member_status(user)}"
+        f"Status: {_member_status(user)}\n"
+        f"Joined: {user.created_at:%Y-%m-%d %H:%M}\n"
+        f"Admin Note: {user.admin_note or 'None'}"
+    )
+
+
+async def _member_activity_text(session: AsyncSession, user: object) -> str:
+    orders = await order_count(session, user.id)
+    spent = await total_spent(session, user.id)
+    today_deposit = await deposited_today(session, user.id)
+    return (
+        f"{_member_text(user)}\n"
+        f"Total Orders: {orders}\n"
+        f"Total Spent: {money(spent)}\n"
+        f"Deposited Today: {money(today_deposit)}"
     )
 
 
@@ -330,6 +365,52 @@ async def stats_text(message: Message, session: AsyncSession, state: FSMContext)
     )
 
 
+@router.message(StateFilter("*"), F.text.in_({"Reports", "REPORTS", "📈 Reports"}))
+async def reports_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    today = await sales_report(session, days=1)
+    week = await sales_report(session, days=7)
+    month = await sales_report(session, days=30)
+    await message.answer(
+        "Sales Reports\n\n"
+        f"Today: {today['orders']} orders | Revenue {money(today['revenue'])} | Refunded {money(today['refunded'])}\n"
+        f"7 Days: {week['orders']} orders | Revenue {money(week['revenue'])} | Refunded {money(week['refunded'])}\n"
+        f"30 Days: {month['orders']} orders | Revenue {money(month['revenue'])} | Refunded {money(month['refunded'])}",
+        reply_markup=admin_reply_menu(),
+    )
+
+
+@router.message(StateFilter("*"), F.text.in_({"Broadcast", "BROADCAST", "📣 Broadcast"}))
+async def broadcast_start_text(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    await state.set_state(BroadcastForm.message)
+    await message.answer("Broadcast\n\nSend the message you want to send to all members.")
+
+
+@router.message(BroadcastForm.message)
+async def broadcast_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    users = await list_all_users(session)
+    sent = 0
+    failed = 0
+    for user in users:
+        try:
+            await message.bot.send_message(user.telegram_id, message.text)
+            sent += 1
+        except Exception:
+            failed += 1
+    await state.clear()
+    await log_admin_action(session, message.from_user.id, "broadcast", details=f"sent={sent}, failed={failed}")
+    await message.answer(f"Broadcast completed.\n\nSent: {sent}\nFailed: {failed}", reply_markup=admin_reply_menu())
+
+
 @router.message(StateFilter("*"), F.text.in_({"Members", "MEMBERS", "👥 Members", "Search Member", "🔎 Search Member"}))
 async def members_start_text(message: Message, state: FSMContext) -> None:
     await state.clear()
@@ -387,7 +468,7 @@ async def member_select_text(message: Message, state: FSMContext, session: Async
         await message.answer("Member not found.", reply_markup=admin_reply_menu())
         return
     await message.answer(
-        _member_text(user),
+        await _member_activity_text(session, user),
         reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
     )
 
@@ -402,7 +483,7 @@ async def member_lookup_finish(message: Message, state: FSMContext, session: Asy
         await message.answer("Member not found.", reply_markup=admin_reply_menu())
         return
     await message.answer(
-        _member_text(user),
+        await _member_activity_text(session, user),
         reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
     )
 
@@ -421,6 +502,7 @@ async def member_action_text(message: Message, state: FSMContext, session: Async
         "Remove Balance #",
         "Check Orders #",
         "Check Balance #",
+        "Note Member #",
         "Ban Member #",
         "Unban Member #",
         "Restrict Member #",
@@ -460,8 +542,19 @@ async def member_action_text(message: Message, state: FSMContext, session: Async
 
     if action_text.startswith("Check Balance #"):
         await message.answer(
-            _member_text(user),
+            await _member_activity_text(session, user),
             reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
+        )
+        return
+
+    if action_text.startswith("Note Member #"):
+        await state.update_data(member_id=user.id)
+        await state.set_state(MemberNoteForm.note)
+        await message.answer(
+            "Admin Note\n\n"
+            f"Member: {user.first_name or user.telegram_id}\n"
+            f"Current Note: {user.admin_note or 'None'}\n\n"
+            "Send new note. Send '-' to clear note."
         )
         return
 
@@ -473,17 +566,18 @@ async def member_action_text(message: Message, state: FSMContext, session: Async
             text = "Member Orders\n\nNo orders found."
         else:
             text = "Member Orders\n\n" + "\n".join(
-                f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}"
+                f"#{order.id} - {money(order.amount)} - {order.status.value} - {order.created_at:%Y-%m-%d %H:%M}"
                 for order in orders
             )
-        await message.answer(text, reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted))
+        await message.answer(text, reply_markup=member_orders_reply_menu(user.id, orders))
         return
 
     if action_text.startswith("Ban Member #") or action_text.startswith("Unban Member #"):
         banned = action_text.startswith("Ban Member #")
         user = await set_user_banned(session, user.id, banned)
+        await log_admin_action(session, message.from_user.id, "ban_member" if banned else "unban_member", "user", user.id)
         await message.answer(
-            f"Member {'Banned' if banned else 'Unbanned'}\n\n{_member_text(user)}",
+            f"Member {'Banned' if banned else 'Unbanned'}\n\n{await _member_activity_text(session, user)}",
             reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
         )
         return
@@ -491,8 +585,9 @@ async def member_action_text(message: Message, state: FSMContext, session: Async
     if action_text.startswith("Restrict Member #") or action_text.startswith("Unrestrict Member #"):
         restricted = action_text.startswith("Restrict Member #")
         user = await set_user_restricted(session, user.id, restricted)
+        await log_admin_action(session, message.from_user.id, "restrict_member" if restricted else "unrestrict_member", "user", user.id)
         await message.answer(
-            f"Member {'Restricted' if restricted else 'Unrestricted'}\n\n{_member_text(user)}",
+            f"Member {'Restricted' if restricted else 'Unrestricted'}\n\n{await _member_activity_text(session, user)}",
             reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
         )
 
@@ -523,6 +618,78 @@ async def member_balance_finish(message: Message, state: FSMContext, session: As
         f"New Balance: {money(user.balance)}",
         reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
     )
+    await log_admin_action(
+        session,
+        message.from_user.id,
+        "add_balance" if signed_amount > 0 else "remove_balance",
+        "user",
+        user.id,
+        details=f"amount={amount}",
+    )
+
+
+@router.message(MemberNoteForm.note)
+async def member_note_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    note = "" if message.text.strip() == "-" else message.text
+    user = await set_user_note(session, int(data["member_id"]), note)
+    await state.clear()
+    if not user:
+        await message.answer("Member not found.", reply_markup=admin_reply_menu())
+        return
+    await log_admin_action(session, message.from_user.id, "set_member_note", "user", user.id)
+    await message.answer(
+        f"Note Updated\n\n{await _member_activity_text(session, user)}",
+        reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
+    )
+
+
+@router.message(StateFilter("*"), F.text.func(_is_refund_order))
+async def refund_order_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    order_id = _id_from_hash_button(message.text, "Refund Order #")
+    if not order_id:
+        await message.answer("Invalid order action.", reply_markup=admin_reply_menu())
+        return
+    await message.answer(
+        f"Confirm refund for order #{order_id}?\n\nThis will mark the order as refunded and return the amount to the member balance.",
+        reply_markup=refund_confirm_reply_menu(order_id),
+    )
+
+
+@router.message(StateFilter("*"), F.text.func(_is_refund_confirm))
+async def refund_order_confirm_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    order_id = _id_from_hash_button(message.text, "Confirm Refund Order #")
+    if not order_id:
+        await message.answer("Invalid order action.", reply_markup=admin_reply_menu())
+        return
+    ok, text, order = await refund_order(session, order_id)
+    if order:
+        await log_admin_action(session, message.from_user.id, "refund_order", "order", order.id, details=text)
+        from bot.database.models import User
+
+        user = await session.get(User, order.user_id)
+        if user:
+            try:
+                await message.bot.send_message(
+                    user.telegram_id,
+                    "Order Refund\n\n"
+                    f"Order ID: #{order.id}\n"
+                    f"Refunded Amount: {money(order.amount)}\n"
+                    "Your balance has been updated.",
+                )
+            except Exception:
+                pass
+    await message.answer(text, reply_markup=admin_reply_menu())
 
 
 @router.callback_query(F.data == "admin_products")
@@ -969,6 +1136,7 @@ async def admin_delete_product_finish(callback: CallbackQuery, session: AsyncSes
     if not ok:
         await callback.answer(text, show_alert=True)
         return
+    await log_admin_action(session, callback.from_user.id, "delete_product", "product", product_id, details=text)
     await callback.message.edit_text(text)
     await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     await callback.answer()
@@ -988,6 +1156,7 @@ async def admin_delete_product_finish_text(message: Message, session: AsyncSessi
         await message.answer("Invalid product action.")
         return
     ok, text = await delete_product(session, product_id)
+    await log_admin_action(session, message.from_user.id, "delete_product", "product", product_id, details=text)
     await message.answer(text, reply_markup=admin_reply_menu())
 
 
@@ -1037,6 +1206,14 @@ async def review_deposit_callback(callback: CallbackQuery, session: AsyncSession
             )
         except Exception:
             pass
+    await log_admin_action(
+        session,
+        callback.from_user.id,
+        "approve_deposit" if action == "deposit_approve" else "reject_deposit",
+        "deposit",
+        deposit.id,
+        details=f"amount={float(deposit.amount)}",
+    )
     await callback.message.edit_text(f"Deposit #{deposit.id} {deposit.status.value}.")
     await _send_next_deposit_after_review(callback.message, session, deposit)
     await callback.answer()
@@ -1076,6 +1253,14 @@ async def review_deposit_text(message: Message, session: AsyncSession, state: FS
             )
         except Exception:
             pass
+    await log_admin_action(
+        session,
+        message.from_user.id,
+        "approve_deposit" if approve else "reject_deposit",
+        "deposit",
+        deposit.id,
+        details=f"amount={float(deposit.amount)}",
+    )
     await _send_next_deposit_after_review(message, session, deposit)
 
 

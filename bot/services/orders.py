@@ -1,10 +1,11 @@
 from datetime import datetime, time
+from datetime import timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
-from bot.database.models import Order, Product, ReferralReward, StockItem, User
+from bot.database.models import Order, OrderStatus, Product, ReferralReward, StockItem, User
 from bot.services.products import reserve_stock_item, reserve_stock_items
 
 
@@ -49,6 +50,7 @@ async def purchase_product(session: AsyncSession, user: User, product_id: int) -
                 )
 
     await session.commit()
+    await session.refresh(order)
     return True, "Purchase completed.", stock_item
 
 
@@ -110,6 +112,46 @@ async def purchase_product_bulk(
 
     await session.commit()
     return True, "Bulk purchase completed.", stock_items
+
+
+async def refund_order(session: AsyncSession, order_id: int) -> tuple[bool, str, Order | None]:
+    order = await session.get(Order, order_id)
+    if not order:
+        return False, "Order not found.", None
+    if order.status == OrderStatus.REFUNDED:
+        return False, "Order already refunded.", order
+    user = await session.get(User, order.user_id)
+    if not user:
+        return False, "Order user not found.", order
+    order.status = OrderStatus.REFUNDED
+    user.balance = float(user.balance) + float(order.amount)
+    await session.commit()
+    await session.refresh(order)
+    return True, "Order refunded and balance returned.", order
+
+
+async def sales_report(session: AsyncSession, days: int = 1) -> dict[str, float | int]:
+    start = datetime.utcnow() - timedelta(days=days)
+    orders_total = int(await session.scalar(select(func.count(Order.id)).where(Order.created_at >= start)) or 0)
+    revenue = float(
+        await session.scalar(
+            select(func.coalesce(func.sum(Order.amount), 0)).where(
+                Order.created_at >= start,
+                Order.status == OrderStatus.COMPLETED,
+            )
+        )
+        or 0
+    )
+    refunded = float(
+        await session.scalar(
+            select(func.coalesce(func.sum(Order.amount), 0)).where(
+                Order.created_at >= start,
+                Order.status == OrderStatus.REFUNDED,
+            )
+        )
+        or 0
+    )
+    return {"days": days, "orders": orders_total, "revenue": revenue, "refunded": refunded}
 
 
 async def recent_orders(session: AsyncSession, user_id: int, limit: int = 10) -> list[Order]:

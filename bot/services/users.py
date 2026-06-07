@@ -47,6 +47,11 @@ async def list_recent_users(session: AsyncSession, limit: int = 20) -> list[User
     return list(result.scalars().all())
 
 
+async def list_all_users(session: AsyncSession) -> list[User]:
+    result = await session.execute(select(User).order_by(User.id))
+    return list(result.scalars().all())
+
+
 async def find_user(session: AsyncSession, query: str) -> User | None:
     clean = query.strip()
     if clean.startswith("@"):
@@ -63,6 +68,16 @@ async def adjust_user_balance(session: AsyncSession, user_id: int, amount: float
     user.balance = round(float(user.balance) + amount, 2)
     if float(user.balance) < 0:
         user.balance = 0
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def set_user_note(session: AsyncSession, user_id: int, note: str) -> User | None:
+    user = await session.get(User, user_id)
+    if not user:
+        return None
+    user.admin_note = note.strip() or None
     await session.commit()
     await session.refresh(user)
     return user
