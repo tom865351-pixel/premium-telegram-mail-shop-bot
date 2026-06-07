@@ -12,10 +12,8 @@ from bot.config import get_settings
 from bot.keyboards.user import (
     back_menu,
     deposit_methods,
-    main_menu,
     main_reply_menu,
     product_buy_menu,
-    products_menu,
     products_reply_menu,
 )
 from bot.services.coupons import redeem_coupon
@@ -92,7 +90,6 @@ async def send_menu(message: Message, session: AsyncSession, referral_code: str 
         "Choose an option below."
     )
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
-    await message.answer("Quick actions:", reply_markup=main_menu(message.from_user.id in settings.admin_ids))
 
 
 @router.message(Command("start"))
@@ -107,8 +104,8 @@ async def menu(callback: CallbackQuery, session: AsyncSession, state: FSMContext
     user = await get_or_create_user(session, callback.from_user)
     await callback.message.edit_text(
         f"Main Menu\n\nBalance: {money(user.balance)}",
-        reply_markup=main_menu(callback.from_user.id in settings.admin_ids),
     )
+    await callback.message.answer("Menu updated.", reply_markup=main_reply_menu(callback.from_user.id in settings.admin_ids))
     await callback.answer()
 
 
@@ -162,7 +159,7 @@ async def products(callback: CallbackQuery, session: AsyncSession) -> None:
             "Choose a product.",
             reply_markup=products_reply_menu(product_rows, callback.from_user.id in get_settings().admin_ids),
         )
-        await callback.message.edit_text("Products", reply_markup=products_menu(product_rows))
+        await callback.message.edit_text("Products")
     await callback.answer()
 
 
@@ -264,7 +261,7 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
     await message.answer_document(
         delivery_file,
         caption=f"{text}\n\nDelivered {len(stock_items)} item(s) in Excel file.",
-        reply_markup=main_menu(message.from_user.id in get_settings().admin_ids),
+        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
     )
 
 
@@ -362,7 +359,7 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
     await message.answer(
         f"Deposit request #{deposit.id} submitted.\n"
         "An admin will review it shortly.",
-        reply_markup=main_menu(message.from_user.id in get_settings().admin_ids),
+        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
     )
 
 
@@ -384,7 +381,7 @@ async def coupon_code(message: Message, state: FSMContext, session: AsyncSession
     user = await get_or_create_user(session, message.from_user)
     ok, text = await redeem_coupon(session, user, message.text)
     await state.clear()
-    await message.answer(text, reply_markup=main_menu(message.from_user.id in get_settings().admin_ids))
+    await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
 
 
 @router.callback_query(F.data == "referral")

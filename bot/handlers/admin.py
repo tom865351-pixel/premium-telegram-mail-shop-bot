@@ -93,7 +93,6 @@ async def admin_command(message: Message) -> None:
         await message.answer("You are not authorized.")
         return
     await message.answer("Admin Panel", reply_markup=admin_reply_menu())
-    await message.answer("Admin quick actions:", reply_markup=admin_menu())
 
 
 @router.callback_query(F.data == "admin")
@@ -102,8 +101,8 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("Unauthorized.", show_alert=True)
         return
+    await callback.message.edit_text("Admin Panel")
     await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
-    await callback.message.edit_text("Admin quick actions:", reply_markup=admin_menu())
     await callback.answer()
 
 
@@ -114,7 +113,6 @@ async def admin_panel_text(message: Message, state: FSMContext) -> None:
         await message.answer("You are not authorized.")
         return
     await message.answer("Admin Panel", reply_markup=admin_reply_menu())
-    await message.answer("Admin quick actions:", reply_markup=admin_menu())
 
 
 @router.callback_query(F.data == "admin_stats")
