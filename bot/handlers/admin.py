@@ -11,14 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
 from bot.keyboards.admin import (
-    admin_menu,
-    admin_product_list,
     admin_reply_menu,
-    delete_product_confirm,
-    deposit_review,
-    product_admin_actions,
+    delete_product_confirm_reply_menu,
+    deposit_review_reply_menu,
+    product_admin_actions_reply_menu,
 )
-from bot.keyboards.user import back_menu
 from bot.services.coupons import create_coupon
 from bot.services.deposits import pending_deposits, review_deposit
 from bot.services.products import add_stock, create_product, delete_product, list_all_products, toggle_product
@@ -45,6 +42,15 @@ class CouponAdminForm(StatesGroup):
 
 def is_admin(user_id: int) -> bool:
     return user_id in get_settings().admin_ids
+
+
+def _id_from_hash_button(text: str, prefix: str) -> int | None:
+    if not text.startswith(prefix):
+        return None
+    try:
+        return int(text.rsplit("#", 1)[1].strip())
+    except (IndexError, ValueError):
+        return None
 
 
 def _looks_like_header(values: list[str]) -> bool:
@@ -129,8 +135,8 @@ async def stats(callback: CallbackQuery, session: AsyncSession) -> None:
         f"Orders: {data['orders']}\n"
         f"Revenue: {money(data['revenue'])}\n"
         f"Pending deposits: {data['pending_deposits']}",
-        reply_markup=admin_menu(),
     )
+    await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     await callback.answer()
 
 
@@ -159,13 +165,15 @@ async def admin_products(callback: CallbackQuery, session: AsyncSession) -> None
         return
     rows = await list_all_products(session)
     if not rows:
-        await callback.message.edit_text("No products created.", reply_markup=admin_menu())
+        await callback.message.edit_text("No products created.")
+        await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     else:
         text = "Products\n\n" + "\n".join(
             f"#{product.id} {product.name} - {money(product.price)} - stock {stock} - {'active' if product.is_active else 'disabled'}"
             for product, stock in rows
         )
-        await callback.message.edit_text(text, reply_markup=admin_product_list(rows))
+        await callback.message.edit_text(text)
+        await callback.message.answer("Use admin actions from the keyboard.", reply_markup=admin_reply_menu())
     await callback.answer()
 
 
@@ -182,7 +190,7 @@ async def admin_products_text(message: Message, session: AsyncSession) -> None:
             f"#{product.id} {product.name} - {money(product.price)} - stock {stock} - {'active' if product.is_active else 'disabled'}"
             for product, stock in rows
         )
-        await message.answer(text, reply_markup=admin_product_list(rows))
+        await message.answer(text, reply_markup=admin_reply_menu())
 
 
 @router.callback_query(F.data.startswith("admin_product:"))
@@ -204,7 +212,10 @@ async def admin_product_detail(callback: CallbackQuery, session: AsyncSession) -
         f"Stock: {stock_count}\n"
         f"Status: {'active' if product.is_active else 'disabled'}\n\n"
         f"{product.description}",
-        reply_markup=product_admin_actions(product.id, product.is_active),
+    )
+    await callback.message.answer(
+        "Choose product action.",
+        reply_markup=product_admin_actions_reply_menu(product.id, product.is_active),
     )
     await callback.answer()
 
@@ -231,8 +242,7 @@ async def add_product_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text(
         "Send product details in this format:\n\n"
         "Name | Price | Description\n\n"
-        "Example:\nGmail Fresh | 2.50 | Fresh Gmail accounts",
-        reply_markup=back_menu(),
+        "Example:\nGmail Fresh | 2.50 | Fresh Gmail accounts"
     )
     await callback.answer()
 
@@ -267,7 +277,10 @@ async def add_product_finish(message: Message, state: FSMContext, session: Async
         await message.answer("Price must be a number.")
         return
     await state.clear()
-    await message.answer(f"Created product #{product.id}: {product.name}", reply_markup=product_admin_actions(product.id, True))
+    await message.answer(
+        f"Created product #{product.id}: {product.name}",
+        reply_markup=product_admin_actions_reply_menu(product.id, True),
+    )
 
 
 @router.callback_query(F.data == "admin_add_stock")
@@ -277,15 +290,32 @@ async def add_stock_start(callback: CallbackQuery, state: FSMContext, session: A
         return
     products = await list_all_products(session)
     if not products:
-        await callback.message.edit_text("Create a product before adding stock.", reply_markup=admin_menu())
+        await callback.message.edit_text("Create a product before adding stock.")
+        await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     else:
         await state.set_state(StockForm.product_id)
         await callback.message.edit_text(
             "Send the product ID to stock.\n\n"
-            + "\n".join(f"#{product.id} {product.name}" for product, _ in products),
-            reply_markup=back_menu(),
+            + "\n".join(f"#{product.id} {product.name}" for product, _ in products)
         )
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text.startswith("Add Stock #"))
+async def add_stock_for_product_text(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Add Stock #")
+    if not product_id:
+        await message.answer("Invalid product action.")
+        return
+    await state.update_data(product_id=product_id)
+    await state.set_state(StockForm.payload)
+    await message.answer(
+        "Send bulk stock lines, one item per line, or upload .xlsx/.csv/.txt.\n\n"
+        "email1@example.com|password1\nemail2@example.com|password2"
+    )
 
 
 @router.message(StateFilter(None), F.text == "Deposits")
@@ -305,7 +335,7 @@ async def deposits_text(message: Message, session: AsyncSession) -> None:
             f"Method: {first.method}\n"
             f"TXID: {first.transaction_id}\n\n"
             f"Queue size: {len(rows)}",
-            reply_markup=deposit_review(first.id),
+            reply_markup=deposit_review_reply_menu(first.id),
         )
 
 
@@ -319,8 +349,7 @@ async def add_stock_for_product(callback: CallbackQuery, state: FSMContext) -> N
     await state.set_state(StockForm.payload)
     await callback.message.edit_text(
         "Send bulk stock lines, one item per line, or upload .xlsx/.csv/.txt.\n\n"
-        "email1@example.com|password1\nemail2@example.com|password2",
-        reply_markup=back_menu(),
+        "email1@example.com|password1\nemail2@example.com|password2"
     )
     await callback.answer()
 
@@ -383,7 +412,7 @@ async def stock_payload_file(message: Message, state: FSMContext, session: Async
     await state.clear()
     await message.answer(
         f"Uploaded {file_name} and added {count} stock item(s).",
-        reply_markup=admin_menu(),
+        reply_markup=admin_reply_menu(),
     )
 
 
@@ -397,7 +426,7 @@ async def stock_payload(message: Message, state: FSMContext, session: AsyncSessi
     data = await state.get_data()
     count = await add_stock(session, int(data["product_id"]), message.text.splitlines())
     await state.clear()
-    await message.answer(f"Added {count} stock item(s).", reply_markup=admin_menu())
+    await message.answer(f"Added {count} stock item(s).", reply_markup=admin_reply_menu())
 
 
 @router.callback_query(F.data.startswith("admin_toggle_product:"))
@@ -412,9 +441,56 @@ async def admin_toggle(callback: CallbackQuery, session: AsyncSession) -> None:
         return
     await callback.message.edit_text(
         f"{product.name} is now {'active' if product.is_active else 'disabled'}.",
-        reply_markup=product_admin_actions(product.id, product.is_active),
+    )
+    await callback.message.answer(
+        "Choose product action.",
+        reply_markup=product_admin_actions_reply_menu(product.id, product.is_active),
     )
     await callback.answer()
+
+
+@router.message(
+    StateFilter(None),
+    F.text.func(
+        lambda text: text.startswith(("Enable Product #", "Disable Product #", "Delete Product #", "Cancel Product #"))
+    ),
+)
+async def toggle_or_delete_product_text(message: Message, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+
+    if message.text.startswith("Enable Product #") or message.text.startswith("Disable Product #"):
+        product_id = _id_from_hash_button(message.text, "Enable Product #") or _id_from_hash_button(
+            message.text, "Disable Product #"
+        )
+        if not product_id:
+            await message.answer("Invalid product action.")
+            return
+        product = await toggle_product(session, product_id)
+        if not product:
+            await message.answer("Product not found.", reply_markup=admin_reply_menu())
+            return
+        await message.answer(
+            f"{product.name} is now {'active' if product.is_active else 'disabled'}.",
+            reply_markup=product_admin_actions_reply_menu(product.id, product.is_active),
+        )
+        return
+
+    if message.text.startswith("Delete Product #"):
+        product_id = _id_from_hash_button(message.text, "Delete Product #")
+        if not product_id:
+            await message.answer("Invalid product action.")
+            return
+        await message.answer(
+            "Delete this product?\n\n"
+            "If this product already has orders, it will be disabled and only unsold stock will be removed.",
+            reply_markup=delete_product_confirm_reply_menu(product_id),
+        )
+        return
+
+    if message.text.startswith("Cancel Product #"):
+        await message.answer("Cancelled.", reply_markup=admin_reply_menu())
 
 
 @router.callback_query(F.data.startswith("admin_delete_product:"))
@@ -426,8 +502,8 @@ async def admin_delete_product(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         "Delete this product?\n\n"
         "If this product already has orders, it will be disabled and only unsold stock will be removed.",
-        reply_markup=delete_product_confirm(product_id),
     )
+    await callback.message.answer("Confirm delete.", reply_markup=delete_product_confirm_reply_menu(product_id))
     await callback.answer()
 
 
@@ -441,8 +517,22 @@ async def admin_delete_product_finish(callback: CallbackQuery, session: AsyncSes
     if not ok:
         await callback.answer(text, show_alert=True)
         return
-    await callback.message.edit_text(text, reply_markup=admin_menu())
+    await callback.message.edit_text(text)
+    await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text.startswith("Confirm Delete Product #"))
+async def admin_delete_product_finish_text(message: Message, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Confirm Delete Product #")
+    if not product_id:
+        await message.answer("Invalid product action.")
+        return
+    ok, text = await delete_product(session, product_id)
+    await message.answer(text, reply_markup=admin_reply_menu())
 
 
 @router.callback_query(F.data == "admin_deposits")
@@ -452,7 +542,8 @@ async def deposits(callback: CallbackQuery, session: AsyncSession) -> None:
         return
     rows = await pending_deposits(session)
     if not rows:
-        await callback.message.edit_text("No pending deposits.", reply_markup=admin_menu())
+        await callback.message.edit_text("No pending deposits.")
+        await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     else:
         first = rows[0]
         await callback.message.edit_text(
@@ -462,8 +553,8 @@ async def deposits(callback: CallbackQuery, session: AsyncSession) -> None:
             f"Method: {first.method}\n"
             f"TXID: {first.transaction_id}\n\n"
             f"Queue size: {len(rows)}",
-            reply_markup=deposit_review(first.id),
         )
+        await callback.message.answer("Review deposit.", reply_markup=deposit_review_reply_menu(first.id))
     await callback.answer()
 
 
@@ -477,11 +568,27 @@ async def review_deposit_callback(callback: CallbackQuery, session: AsyncSession
     if not deposit:
         await callback.answer("Deposit not found or already reviewed.", show_alert=True)
         return
-    await callback.message.edit_text(
-        f"Deposit #{deposit.id} {deposit.status.value}.",
-        reply_markup=admin_menu(),
-    )
+    await callback.message.edit_text(f"Deposit #{deposit.id} {deposit.status.value}.")
+    await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text.startswith("Approve Deposit #") | F.text.startswith("Reject Deposit #"))
+async def review_deposit_text(message: Message, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    approve = message.text.startswith("Approve Deposit #")
+    prefix = "Approve Deposit #" if approve else "Reject Deposit #"
+    deposit_id = _id_from_hash_button(message.text, prefix)
+    if not deposit_id:
+        await message.answer("Invalid deposit action.")
+        return
+    deposit = await review_deposit(session, deposit_id, approve=approve)
+    if not deposit:
+        await message.answer("Deposit not found or already reviewed.", reply_markup=admin_reply_menu())
+        return
+    await message.answer(f"Deposit #{deposit.id} {deposit.status.value}.", reply_markup=admin_reply_menu())
 
 
 @router.callback_query(F.data == "admin_add_coupon")
@@ -493,8 +600,7 @@ async def add_coupon_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text(
         "Send coupon details:\n\n"
         "CODE | Amount | Max Uses\n\n"
-        "Example:\nWELCOME10 | 1.00 | 100",
-        reply_markup=back_menu(),
+        "Example:\nWELCOME10 | 1.00 | 100"
     )
     await callback.answer()
 
@@ -515,5 +621,5 @@ async def add_coupon_finish(message: Message, state: FSMContext, session: AsyncS
     await state.clear()
     await message.answer(
         f"Created coupon {coupon.code} worth {money(coupon.amount)}.",
-        reply_markup=admin_menu(),
+        reply_markup=admin_reply_menu(),
     )
