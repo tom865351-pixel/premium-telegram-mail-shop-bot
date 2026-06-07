@@ -4,12 +4,13 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 def admin_reply_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="PRODUCTS"), KeyboardButton(text="ADD PRODUCT")],
-            [KeyboardButton(text="ADD STOCK"), KeyboardButton(text="DEPOSITS")],
-            [KeyboardButton(text="COUPONS"), KeyboardButton(text="STATS")],
-            [KeyboardButton(text="MAIN MENU")],
+            [KeyboardButton(text="Products"), KeyboardButton(text="Add Product")],
+            [KeyboardButton(text="Add Stock"), KeyboardButton(text="Deposits")],
+            [KeyboardButton(text="Coupons"), KeyboardButton(text="Stats")],
+            [KeyboardButton(text="Main Menu")],
         ],
         resize_keyboard=True,
+        is_persistent=True,
         input_field_placeholder="Select admin action",
     )
 
@@ -19,18 +20,24 @@ def admin_products_reply_menu(products: list[tuple[object, int]]) -> ReplyKeyboa
     buttons = [KeyboardButton(text=f"Product #{product.id}") for product, _ in products]
     for index in range(0, len(buttons), 2):
         rows.append(buttons[index : index + 2])
-    rows.append([KeyboardButton(text="ADD PRODUCT"), KeyboardButton(text="ADD STOCK")])
-    rows.append([KeyboardButton(text="ADMIN PANEL")])
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder="Select product")
+    rows.append([KeyboardButton(text="Add Product"), KeyboardButton(text="Add Stock")])
+    rows.append([KeyboardButton(text="Admin Panel")])
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Select product",
+    )
 
 
 def deposit_review_reply_menu(deposit_id: int) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=f"APPROVE DEPOSIT #{deposit_id}"), KeyboardButton(text=f"REJECT DEPOSIT #{deposit_id}")],
-            [KeyboardButton(text="DEPOSITS"), KeyboardButton(text="ADMIN PANEL")],
+            [KeyboardButton(text=f"Approve Deposit #{deposit_id}"), KeyboardButton(text=f"Reject Deposit #{deposit_id}")],
+            [KeyboardButton(text="Deposits"), KeyboardButton(text="Admin Panel")],
         ],
         resize_keyboard=True,
+        is_persistent=True,
         input_field_placeholder="Review deposit request",
     )
 
@@ -39,11 +46,12 @@ def product_admin_actions_reply_menu(product_id: int, is_active: bool) -> ReplyK
     label = "Disable" if is_active else "Enable"
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=f"ADD STOCK #{product_id}"), KeyboardButton(text=f"{label.upper()} PRODUCT #{product_id}")],
-            [KeyboardButton(text=f"DELETE PRODUCT #{product_id}")],
-            [KeyboardButton(text="PRODUCTS"), KeyboardButton(text="ADMIN PANEL")],
+            [KeyboardButton(text=f"Add Stock #{product_id}"), KeyboardButton(text=f"{label} Product #{product_id}")],
+            [KeyboardButton(text=f"Delete Product #{product_id}")],
+            [KeyboardButton(text="Products"), KeyboardButton(text="Admin Panel")],
         ],
         resize_keyboard=True,
+        is_persistent=True,
         input_field_placeholder="Select product action",
     )
 
@@ -51,9 +59,10 @@ def product_admin_actions_reply_menu(product_id: int, is_active: bool) -> ReplyK
 def delete_product_confirm_reply_menu(product_id: int) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=f"CONFIRM DELETE PRODUCT #{product_id}")],
-            [KeyboardButton(text=f"CANCEL PRODUCT #{product_id}"), KeyboardButton(text="ADMIN PANEL")],
+            [KeyboardButton(text=f"Confirm Delete Product #{product_id}")],
+            [KeyboardButton(text=f"Cancel Product #{product_id}"), KeyboardButton(text="Admin Panel")],
         ],
         resize_keyboard=True,
+        is_persistent=True,
         input_field_placeholder="Confirm delete",
     )
