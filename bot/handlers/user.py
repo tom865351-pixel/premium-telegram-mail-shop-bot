@@ -15,6 +15,7 @@ from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, prod
 from bot.services.coupons import redeem_coupon
 from bot.database.models import DepositStatus
 from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, txid_exists
+from bot.services.ocr import analyze_payment_screenshot
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
 from bot.services.products import list_active_products
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
@@ -846,6 +847,23 @@ async def deposit_screenshot(message: Message, state: FSMContext, session: Async
     else:
         review_reason = f"{review_reason} Screenshot proof attached for admin matching."
     proof_file_id = message.photo[-1].file_id
+    screenshot_buffer = BytesIO()
+    ocr_status = "OCR not checked"
+    ocr_details = "OCR was not completed."
+    try:
+        await message.bot.download(message.photo[-1], destination=screenshot_buffer)
+        ocr_status, ocr_details = await analyze_payment_screenshot(
+            image_bytes=screenshot_buffer.getvalue(),
+            amount=amount,
+            txid=txid,
+            api_key=settings.ocr_space_api_key,
+            api_url=settings.ocr_space_api_url,
+            enabled=settings.ocr_enabled,
+        )
+    except Exception as exc:
+        ocr_status = "OCR failed"
+        ocr_details = f"OCR failed: {exc}"
+    review_reason = f"{review_reason}\n\nOCR Assistant: {ocr_status}\n{ocr_details}"
     deposit = await create_deposit(
         session=session,
         user_id=user.id,
@@ -853,15 +871,22 @@ async def deposit_screenshot(message: Message, state: FSMContext, session: Async
         method=data["method"],
         transaction_id=txid,
         proof_file_id=proof_file_id,
+        ocr_status=ocr_status,
+        ocr_details=ocr_details,
         status=DepositStatus.APPROVED if auto_approved else DepositStatus.PENDING,
     )
     await state.clear()
     for admin_id in settings.admin_ids:
         try:
+            admin_text = deposit_admin_text(deposit, user, auto_approved=auto_approved, review_reason=review_reason)
             await message.bot.send_photo(
                 admin_id,
                 photo=proof_file_id,
-                caption=deposit_admin_text(deposit, user, auto_approved=auto_approved, review_reason=review_reason),
+                caption=f"Payment screenshot for deposit #{deposit.id}",
+            )
+            await message.bot.send_message(
+                admin_id,
+                admin_text,
                 reply_markup=None if auto_approved else deposit_review_reply_menu(deposit.id),
             )
         except Exception:

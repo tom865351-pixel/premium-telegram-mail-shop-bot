@@ -83,11 +83,16 @@ SEMI_AUTO_DEPOSIT_ENABLED=true
 SEMI_AUTO_DEPOSIT_MAX_AMOUNT=100
 SEMI_AUTO_TRUSTED_USER_MIN_APPROVED_DEPOSITS=1
 SEMI_AUTO_DAILY_USER_LIMIT=200
+OCR_ENABLED=true
+OCR_SPACE_API_KEY=helloworld
+OCR_SPACE_API_URL=https://api.ocr.space/parse/image
 ```
 
 On Railway, set `DATABASE_URL` as a reference to your PostgreSQL service. If the bot logs show a hostname error for `postgres.railway.internal`, also set `DATABASE_PUBLIC_URL` from the PostgreSQL service and redeploy.
 
 `SEMI_AUTO_DEPOSIT_ENABLED=true` allows trusted small deposits to be approved automatically. For safer personal bKash/Nagad/Rocket use, the bot only auto-approves when the transaction ID is unique, does not look suspicious, the amount is at or below `SEMI_AUTO_DEPOSIT_MAX_AMOUNT`, the user already has at least `SEMI_AUTO_TRUSTED_USER_MIN_APPROVED_DEPOSITS` approved deposit, and today's approved total stays under `SEMI_AUTO_DAILY_USER_LIMIT`. This does not verify personal wallet payments through an official API, so first deposits and risky requests still go to admin review.
+
+`OCR_ENABLED=true` lets the bot run a semi-auto OCR assistant on deposit screenshots. OCR compares screenshot text against the submitted amount and transaction ID, then sends admins a match/mismatch report. OCR is only a review helper; admins should still verify before approval.
 
 ## Admin Usage
 

@@ -186,6 +186,7 @@ async def _deposit_details_text(session: AsyncSession, deposit: object, queue_si
         f"Method: {_method_label(deposit.method)}\n"
         f"Transaction ID: <code>{deposit.transaction_id}</code>\n"
         f"Screenshot: {'Attached' if getattr(deposit, 'proof_file_id', None) else 'Missing'}\n"
+        f"OCR Status: {getattr(deposit, 'ocr_status', None) or 'Not checked'}\n"
         f"Status: {deposit.status.value}\n"
         f"Created: {deposit.created_at:%Y-%m-%d %H:%M}"
         f"{queue_line}\n\n"
@@ -193,6 +194,8 @@ async def _deposit_details_text(session: AsyncSession, deposit: object, queue_si
         f"Name: {name}\n"
         f"Username: {username}\n"
         f"Telegram ID: <code>{telegram_id}</code>\n\n"
+        "OCR Assistant\n"
+        f"{getattr(deposit, 'ocr_details', None) or 'No OCR details available.'}\n\n"
         "Verify the payment manually, then approve or reject."
     )
 
@@ -208,9 +211,8 @@ async def _send_next_deposit_after_review(message: Message, session: AsyncSessio
     first = rows[0]
     text = await _deposit_details_text(session, first, len(rows))
     if getattr(first, "proof_file_id", None):
-        await message.answer_photo(first.proof_file_id, caption=text, reply_markup=deposit_review_reply_menu(first.id))
-    else:
-        await message.answer(text, reply_markup=deposit_review_reply_menu(first.id))
+        await message.answer_photo(first.proof_file_id, caption=f"Payment screenshot for deposit #{first.id}")
+    await message.answer(text, reply_markup=deposit_review_reply_menu(first.id))
 
 
 def _looks_like_header(values: list[str]) -> bool:
@@ -785,9 +787,8 @@ async def deposits_text(message: Message, session: AsyncSession, state: FSMConte
         first = rows[0]
         text = await _deposit_details_text(session, first, len(rows))
         if getattr(first, "proof_file_id", None):
-            await message.answer_photo(first.proof_file_id, caption=text, reply_markup=deposit_review_reply_menu(first.id))
-        else:
-            await message.answer(text, reply_markup=deposit_review_reply_menu(first.id))
+            await message.answer_photo(first.proof_file_id, caption=f"Payment screenshot for deposit #{first.id}")
+        await message.answer(text, reply_markup=deposit_review_reply_menu(first.id))
 
 
 @router.callback_query(F.data.startswith("admin_stock_for:"))
@@ -1004,9 +1005,8 @@ async def deposits(callback: CallbackQuery, session: AsyncSession) -> None:
         text = await _deposit_details_text(session, first, len(rows))
         await callback.message.edit_text("Review deposit.")
         if getattr(first, "proof_file_id", None):
-            await callback.message.answer_photo(first.proof_file_id, caption=text, reply_markup=deposit_review_reply_menu(first.id))
-        else:
-            await callback.message.answer(text, reply_markup=deposit_review_reply_menu(first.id))
+            await callback.message.answer_photo(first.proof_file_id, caption=f"Payment screenshot for deposit #{first.id}")
+        await callback.message.answer(text, reply_markup=deposit_review_reply_menu(first.id))
     await callback.answer()
 
 

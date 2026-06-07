@@ -13,6 +13,8 @@ async def create_deposit(
     method: str,
     transaction_id: str,
     proof_file_id: str | None = None,
+    ocr_status: str | None = None,
+    ocr_details: str | None = None,
     status: DepositStatus = DepositStatus.PENDING,
 ) -> Deposit:
     deposit = Deposit(
@@ -21,6 +23,8 @@ async def create_deposit(
         method=method,
         transaction_id=transaction_id.strip(),
         proof_file_id=proof_file_id,
+        ocr_status=ocr_status,
+        ocr_details=ocr_details,
         status=status,
     )
     if status == DepositStatus.APPROVED:

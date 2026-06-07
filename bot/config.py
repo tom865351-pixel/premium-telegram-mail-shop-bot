@@ -28,6 +28,9 @@ class Settings(BaseSettings):
         alias="SEMI_AUTO_TRUSTED_USER_MIN_APPROVED_DEPOSITS",
     )
     semi_auto_daily_user_limit: float = Field(default=200, alias="SEMI_AUTO_DAILY_USER_LIMIT")
+    ocr_enabled: bool = Field(default=True, alias="OCR_ENABLED")
+    ocr_space_api_key: str = Field(default="helloworld", alias="OCR_SPACE_API_KEY")
+    ocr_space_api_url: str = Field(default="https://api.ocr.space/parse/image", alias="OCR_SPACE_API_URL")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
