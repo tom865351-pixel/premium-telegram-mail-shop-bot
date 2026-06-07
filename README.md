@@ -80,12 +80,14 @@ SUPPORT_USERNAME=your_support
 MIN_DEPOSIT=100
 CURRENCY_SYMBOL=TK
 SEMI_AUTO_DEPOSIT_ENABLED=true
-SEMI_AUTO_DEPOSIT_MAX_AMOUNT=300
+SEMI_AUTO_DEPOSIT_MAX_AMOUNT=100
+SEMI_AUTO_TRUSTED_USER_MIN_APPROVED_DEPOSITS=1
+SEMI_AUTO_DAILY_USER_LIMIT=200
 ```
 
 On Railway, set `DATABASE_URL` as a reference to your PostgreSQL service. If the bot logs show a hostname error for `postgres.railway.internal`, also set `DATABASE_PUBLIC_URL` from the PostgreSQL service and redeploy.
 
-`SEMI_AUTO_DEPOSIT_ENABLED=true` allows deposits at or below `SEMI_AUTO_DEPOSIT_MAX_AMOUNT` to be approved automatically after the user submits a unique transaction ID. This does not verify personal bKash/Nagad/Rocket payments through an official API; it blocks duplicate transaction IDs and sends admin notifications.
+`SEMI_AUTO_DEPOSIT_ENABLED=true` allows trusted small deposits to be approved automatically. For safer personal bKash/Nagad/Rocket use, the bot only auto-approves when the transaction ID is unique, does not look suspicious, the amount is at or below `SEMI_AUTO_DEPOSIT_MAX_AMOUNT`, the user already has at least `SEMI_AUTO_TRUSTED_USER_MIN_APPROVED_DEPOSITS` approved deposit, and today's approved total stays under `SEMI_AUTO_DAILY_USER_LIMIT`. This does not verify personal wallet payments through an official API, so first deposits and risky requests still go to admin review.
 
 ## Admin Usage
 

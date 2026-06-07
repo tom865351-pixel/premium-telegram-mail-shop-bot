@@ -42,6 +42,16 @@ async def txid_exists(session: AsyncSession, transaction_id: str) -> bool:
     return existing is not None
 
 
+async def approved_deposit_count(session: AsyncSession, user_id: int) -> int:
+    total = await session.scalar(
+        select(func.count(Deposit.id)).where(
+            Deposit.user_id == user_id,
+            Deposit.status == DepositStatus.APPROVED,
+        )
+    )
+    return int(total or 0)
+
+
 async def pending_deposits(session: AsyncSession, limit: int = 20) -> list[Deposit]:
     result = await session.execute(
         select(Deposit)

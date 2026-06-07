@@ -13,7 +13,7 @@ from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu
 from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
 from bot.services.coupons import redeem_coupon
 from bot.database.models import DepositStatus
-from bot.services.deposits import create_deposit, deposited_today, txid_exists
+from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, txid_exists
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
 from bot.services.products import list_active_products
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
@@ -219,7 +219,12 @@ def user_label(user: object) -> str:
     return f"{name} ({username})"
 
 
-def deposit_admin_text(deposit: object, user: object, auto_approved: bool = False) -> str:
+def deposit_admin_text(
+    deposit: object,
+    user: object,
+    auto_approved: bool = False,
+    review_reason: str | None = None,
+) -> str:
     method = DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())
     title = "Auto Approved Deposit" if auto_approved else "New Deposit Request"
     footer = (
@@ -237,6 +242,7 @@ def deposit_admin_text(deposit: object, user: object, auto_approved: bool = Fals
         f"Name: {user.first_name or 'Unknown'}\n"
         f"Username: @{user.username if user.username else 'not_available'}\n"
         f"Telegram ID: <code>{user.telegram_id}</code>\n\n"
+        f"Review Note: {review_reason or 'Trusted semi-auto rules passed'}\n\n"
         f"{footer}"
     )
 
@@ -267,6 +273,49 @@ def clean_button_text(text: str) -> str:
                 cleaned = cleaned[len(prefix) :].strip()
                 changed = True
     return cleaned
+
+
+def suspicious_txid_reason(txid: str) -> str | None:
+    normalized = txid.strip().lower().replace(" ", "")
+    suspicious_words = ("test", "fake", "demo", "txid", "trxid")
+    suspicious_numbers = ("1234", "0000", "1111", "2222", "9999")
+    if len(normalized) < 8:
+        return "Transaction ID is too short for auto approval."
+    if len(set(normalized)) <= 2:
+        return "Transaction ID pattern looks suspicious."
+    if any(word in normalized for word in suspicious_words):
+        return "Transaction ID contains suspicious text."
+    if any(number in normalized for number in suspicious_numbers):
+        return "Transaction ID contains suspicious number pattern."
+    return None
+
+
+async def semi_auto_deposit_decision(
+    session: AsyncSession,
+    user: object,
+    amount: float,
+    txid: str,
+) -> tuple[bool, str]:
+    settings = get_settings()
+    if not settings.semi_auto_deposit_enabled:
+        return False, "Semi-auto deposit is disabled."
+    if amount > settings.semi_auto_deposit_max_amount:
+        return False, f"Amount is above auto limit: {money(settings.semi_auto_deposit_max_amount)}."
+
+    suspicious_reason = suspicious_txid_reason(txid)
+    if suspicious_reason:
+        return False, suspicious_reason
+
+    approved_count = await approved_deposit_count(session, user.id)
+    required_count = settings.semi_auto_trusted_user_min_approved_deposits
+    if approved_count < required_count:
+        return False, "First deposit requires manual admin verification."
+
+    today_total = await deposited_today(session, user.id)
+    if today_total + amount > settings.semi_auto_daily_user_limit:
+        return False, f"Daily auto limit exceeded: {money(settings.semi_auto_daily_user_limit)}."
+
+    return True, "Trusted user, unique TXID, and amount limits matched."
 
 
 async def profile_text(session: AsyncSession, user: object) -> str:
@@ -698,7 +747,7 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
 
     settings = get_settings()
     amount = float(data["amount"])
-    auto_approved = settings.semi_auto_deposit_enabled and amount <= settings.semi_auto_deposit_max_amount
+    auto_approved, review_reason = await semi_auto_deposit_decision(session, user, amount, txid)
     deposit = await create_deposit(
         session=session,
         user_id=user.id,
@@ -712,7 +761,7 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
         try:
             await message.bot.send_message(
                 admin_id,
-                deposit_admin_text(deposit, user, auto_approved=auto_approved),
+                deposit_admin_text(deposit, user, auto_approved=auto_approved, review_reason=review_reason),
                 reply_markup=None if auto_approved else deposit_review_reply_menu(deposit.id),
             )
         except Exception:
@@ -733,6 +782,7 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
             f"Request ID: #{deposit.id}\n"
             f"Amount: {money(deposit.amount)}\n"
             f"Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n\n"
+            f"Review note: {review_reason}\n\n"
             "This deposit needs admin verification before balance is added.",
             reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
         )

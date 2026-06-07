@@ -22,7 +22,12 @@ class Settings(BaseSettings):
     min_deposit: float = Field(default=1.0, alias="MIN_DEPOSIT")
     currency_symbol: str = Field(default="$", alias="CURRENCY_SYMBOL")
     semi_auto_deposit_enabled: bool = Field(default=True, alias="SEMI_AUTO_DEPOSIT_ENABLED")
-    semi_auto_deposit_max_amount: float = Field(default=300, alias="SEMI_AUTO_DEPOSIT_MAX_AMOUNT")
+    semi_auto_deposit_max_amount: float = Field(default=100, alias="SEMI_AUTO_DEPOSIT_MAX_AMOUNT")
+    semi_auto_trusted_user_min_approved_deposits: int = Field(
+        default=1,
+        alias="SEMI_AUTO_TRUSTED_USER_MIN_APPROVED_DEPOSITS",
+    )
+    semi_auto_daily_user_limit: float = Field(default=200, alias="SEMI_AUTO_DAILY_USER_LIMIT")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
