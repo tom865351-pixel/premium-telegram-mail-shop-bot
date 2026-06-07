@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import Order, Product, StockItem
@@ -21,6 +22,7 @@ async def list_all_products(session: AsyncSession) -> list[tuple[Product, int]]:
     result = await session.execute(
         select(Product, func.count(StockItem.id))
         .outerjoin(StockItem, (StockItem.product_id == Product.id) & (StockItem.is_sold.is_(False)))
+        .where(Product.name.not_like("[deleted #%"))
         .group_by(Product.id)
         .order_by(Product.id.desc())
     )
@@ -31,6 +33,28 @@ async def create_product(session: AsyncSession, name: str, price: float, descrip
     product = Product(name=name.strip(), price=price, description=description.strip())
     session.add(product)
     await session.commit()
+    await session.refresh(product)
+    return product
+
+
+async def update_product(
+    session: AsyncSession,
+    product_id: int,
+    name: str,
+    price: float,
+    description: str,
+) -> Product | None:
+    product = await session.get(Product, product_id)
+    if not product:
+        return None
+    product.name = name.strip()
+    product.price = price
+    product.description = description.strip()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ValueError("A product with this name already exists.") from exc
     await session.refresh(product)
     return product
 
@@ -59,12 +83,14 @@ async def delete_product(session: AsyncSession, product_id: int) -> tuple[bool, 
 
     order_count = int(await session.scalar(select(func.count(Order.id)).where(Order.product_id == product_id)) or 0)
     if order_count:
+        archived_name = f"[deleted #{product.id}] {product.name}"
+        product.name = archived_name[:255]
         product.is_active = False
         await session.execute(
             delete(StockItem).where(StockItem.product_id == product_id, StockItem.is_sold.is_(False))
         )
         await session.commit()
-        return True, "Product had old orders, so it was disabled and unsold stock was removed."
+        return True, "Product archived and removed from the product list. Old order history was kept safe."
 
     await session.execute(delete(StockItem).where(StockItem.product_id == product_id))
     await session.delete(product)

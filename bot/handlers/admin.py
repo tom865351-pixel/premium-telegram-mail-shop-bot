@@ -20,7 +20,7 @@ from bot.keyboards.admin import (
 )
 from bot.services.coupons import create_coupon
 from bot.services.deposits import pending_deposits, review_deposit
-from bot.services.products import add_stock, create_product, delete_product, list_all_products, toggle_product
+from bot.services.products import add_stock, create_product, delete_product, list_all_products, toggle_product, update_product
 from bot.services.stats import admin_stats
 from bot.utils.formatting import money
 
@@ -30,6 +30,10 @@ SUPPORTED_STOCK_EXTENSIONS = (".xlsx", ".csv", ".txt")
 
 
 class ProductForm(StatesGroup):
+    details = State()
+
+
+class ProductEditForm(StatesGroup):
     details = State()
 
 
@@ -62,6 +66,10 @@ def _is_product_selection(text: str) -> bool:
 
 def _is_add_stock_action(text: str) -> bool:
     return _starts_with_any(text, ("Add Stock #",))
+
+
+def _is_edit_product_action(text: str) -> bool:
+    return _starts_with_any(text, ("Edit Product #",))
 
 
 def _is_product_action(text: str) -> bool:
@@ -406,6 +414,63 @@ async def add_product_finish(message: Message, state: FSMContext, session: Async
     )
 
 
+@router.message(StateFilter("*"), F.text.func(_is_edit_product_action))
+async def edit_product_start_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Edit Product #")
+    if not product_id:
+        await message.answer("Invalid product action.")
+        return
+    rows = await list_all_products(session)
+    product_row = next((row for row in rows if row[0].id == product_id), None)
+    if not product_row:
+        await message.answer("Product not found.", reply_markup=admin_reply_menu())
+        return
+    product, _ = product_row
+    await state.update_data(product_id=product.id)
+    await state.set_state(ProductEditForm.details)
+    await message.answer(
+        "Edit Product\n\n"
+        "Send updated product details in this format:\n\n"
+        "Name | Price | Description\n\n"
+        "Current:\n"
+        f"{product.name} | {float(product.price):.2f} | {product.description or ''}"
+    )
+
+
+@router.message(ProductEditForm.details)
+async def edit_product_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    parts = [part.strip() for part in message.text.split("|", 2)]
+    if len(parts) != 3:
+        await message.answer("Invalid format.\n\nUse: Name | Price | Description")
+        return
+    try:
+        price = float(parts[1])
+    except ValueError:
+        await message.answer("Product price must be a valid number.")
+        return
+
+    data = await state.get_data()
+    try:
+        product = await update_product(session, int(data["product_id"]), parts[0], price, parts[2])
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+    await state.clear()
+    if not product:
+        await message.answer("Product not found.", reply_markup=admin_reply_menu())
+        return
+    await message.answer(
+        f"Product Updated\n\nProduct ID: #{product.id}\nName: {product.name}\nPrice: {money(product.price)}",
+        reply_markup=product_admin_actions_reply_menu(product.id, product.is_active),
+    )
+
+
 @router.callback_query(F.data == "admin_add_stock")
 async def add_stock_start(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     if not is_admin(callback.from_user.id):
@@ -604,7 +669,7 @@ async def toggle_or_delete_product_text(message: Message, session: AsyncSession,
             return
         await message.answer(
             "Delete this product?\n\n"
-            "If this product already has orders, it will be disabled and only unsold stock will be removed.",
+            "If this product already has orders, it will be archived from the product list and old order history will stay safe.",
             reply_markup=delete_product_confirm_reply_menu(product_id),
         )
         return
@@ -621,7 +686,7 @@ async def admin_delete_product(callback: CallbackQuery) -> None:
     product_id = int(callback.data.split(":", 1)[1])
     await callback.message.edit_text(
         "Delete this product?\n\n"
-        "If this product already has orders, it will be disabled and only unsold stock will be removed.",
+        "If this product already has orders, it will be archived from the product list and old order history will stay safe.",
     )
     await callback.message.answer("Confirm delete.", reply_markup=delete_product_confirm_reply_menu(product_id))
     await callback.answer()

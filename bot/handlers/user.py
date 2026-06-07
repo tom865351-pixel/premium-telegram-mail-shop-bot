@@ -179,6 +179,7 @@ GLOBAL_MENU_TEXTS = {
 ADMIN_ACTION_PREFIXES = (
     "Product #",
     "Add Stock #",
+    "Edit Product #",
     "Enable Product #",
     "Disable Product #",
     "Delete Product #",
