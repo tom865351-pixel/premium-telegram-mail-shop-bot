@@ -281,15 +281,7 @@ async def profile_text(session: AsyncSession, user: object) -> str:
 async def send_menu(message: Message, session: AsyncSession, referral_code: str | None = None) -> None:
     settings = get_settings()
     user = await get_or_create_user(session, message.from_user, referral_code)
-    text = (
-        panel(
-            "PREMIUM MAIL SHOP",
-            f"Customer: {user.first_name or 'Customer'}",
-            f"Balance: {money(user.balance)}",
-            "",
-            "Select an option from the keyboard below.",
-        )
-    )
+    text = await profile_text(session, user)
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
 
 
