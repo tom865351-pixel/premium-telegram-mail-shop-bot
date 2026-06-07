@@ -9,7 +9,7 @@ from openpyxl import Workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
-from bot.keyboards.admin import deposit_review_reply_menu
+from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu
 from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
 from bot.services.coupons import redeem_coupon
 from bot.services.deposits import create_deposit
@@ -62,6 +62,19 @@ DEPOSIT_METHOD_LABELS = {
     "bkash": "bKash",
     "nagad": "Nagad",
     "rocket": "Rocket",
+}
+
+ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats"}
+GLOBAL_MENU_TEXTS = {
+    "Main Menu",
+    "Shop",
+    "Deposit",
+    "Profile",
+    "Orders",
+    "Referral",
+    "Coupon",
+    "Support",
+    *ADMIN_MENU_TEXTS,
 }
 
 
@@ -139,6 +152,106 @@ async def send_menu(message: Message, session: AsyncSession, referral_code: str 
 @router.message(Command("start"))
 async def start(message: Message, command: CommandObject, session: AsyncSession) -> None:
     await send_menu(message, session, command.args)
+
+
+@router.message(StateFilter("*"), F.text.in_(GLOBAL_MENU_TEXTS))
+async def global_menu_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    settings = get_settings()
+    user = await get_or_create_user(session, message.from_user)
+
+    if message.text == "Main Menu":
+        await message.answer(
+            "Main Menu\n\n"
+            f"Balance: {money(user.balance)}\n"
+            "Select an option from the keyboard.",
+            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+        )
+        return
+
+    if message.text == "Shop":
+        product_rows = await list_active_products(session)
+        if not product_rows:
+            await message.answer(
+                "No products are available right now. Please check again later.",
+                reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+            )
+            return
+        await message.answer(
+            "Product Catalog\n\nSelect a product from the keyboard below.",
+            reply_markup=products_reply_menu(product_rows, message.from_user.id in settings.admin_ids),
+        )
+        return
+
+    if message.text == "Deposit":
+        await message.answer(
+            "Deposit Funds\n\nSelect your preferred payment method from the keyboard below.",
+            reply_markup=deposit_methods_reply_menu(),
+        )
+        return
+
+    if message.text == "Profile":
+        orders = await order_count(session, user.id)
+        await message.answer(
+            "Account Profile\n\n"
+            f"Telegram ID: <code>{user.telegram_id}</code>\n"
+            f"Balance: {money(user.balance)}\n"
+            f"Total Orders: {orders}\n"
+            f"Referral Code: <code>{user.referral_code}</code>",
+            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+        )
+        return
+
+    if message.text == "Orders":
+        rows = await recent_orders(session, user.id)
+        if not rows:
+            text = "Order History\n\nNo orders found."
+        else:
+            text = "Recent Orders\n\n" + "\n".join(
+                f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
+            )
+        await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        return
+
+    if message.text == "Referral":
+        bot_username = (await message.bot.me()).username
+        link = f"https://t.me/{bot_username}?start={user.referral_code}"
+        await message.answer(
+            "Referral Program\n\n"
+            f"Commission: {settings.referral_commission_percent}%\n"
+            f"Your link:\n{link}",
+            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+        )
+        return
+
+    if message.text == "Coupon":
+        await state.set_state(CouponForm.code)
+        await message.answer("Coupon Redemption\n\nSend your coupon code.")
+        return
+
+    if message.text == "Support":
+        username = clean_support_username(settings.support_username)
+        await message.answer(f"Support: @{username}", reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        return
+
+    if message.text == "Admin Panel":
+        if message.from_user.id not in settings.admin_ids:
+            await message.answer("You are not authorized.", reply_markup=main_reply_menu(False))
+            return
+        await message.answer(
+            "Admin Panel\n\nManage products, stock, deposits, coupons, and store statistics.",
+            reply_markup=admin_reply_menu(),
+        )
+        return
+
+    if message.text in ADMIN_MENU_TEXTS:
+        if message.from_user.id not in settings.admin_ids:
+            await message.answer("You are not authorized.", reply_markup=main_reply_menu(False))
+            return
+        await message.answer(
+            "Admin Panel\n\nPrevious action was cancelled. Select an admin option again.",
+            reply_markup=admin_reply_menu(),
+        )
 
 
 @router.callback_query(F.data == "menu")
