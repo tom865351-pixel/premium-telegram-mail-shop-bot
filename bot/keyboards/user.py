@@ -3,14 +3,14 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 def main_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton(text="Shop Now"), KeyboardButton(text="Deposit")],
-        [KeyboardButton(text="Profile"), KeyboardButton(text="Refer")],
-        [KeyboardButton(text="Coupon"), KeyboardButton(text="Orders")],
+        [KeyboardButton(text="Shop"), KeyboardButton(text="Deposit")],
+        [KeyboardButton(text="Profile"), KeyboardButton(text="Orders")],
+        [KeyboardButton(text="Referral"), KeyboardButton(text="Coupon")],
         [KeyboardButton(text="Support")],
     ]
     if is_admin:
         rows.append([KeyboardButton(text="Admin Panel")])
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder="Choose a menu")
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder="Select an option")
 
 
 def products_reply_menu(products: list[tuple[object, int]], is_admin: bool = False) -> ReplyKeyboardMarkup:
@@ -21,17 +21,17 @@ def products_reply_menu(products: list[tuple[object, int]], is_admin: bool = Fal
     rows.append([KeyboardButton(text="Main Menu")])
     if is_admin:
         rows.append([KeyboardButton(text="Admin Panel")])
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder="Choose a product")
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder="Select product")
 
 
 def product_buy_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="Single Buy"), KeyboardButton(text="Bulk Buy")],
-        [KeyboardButton(text="Shop Now"), KeyboardButton(text="Main Menu")],
+        [KeyboardButton(text="Shop"), KeyboardButton(text="Main Menu")],
     ]
     if is_admin:
         rows.append([KeyboardButton(text="Admin Panel")])
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder="Choose buy option")
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder="Select purchase type")
 
 
 def deposit_methods_reply_menu() -> ReplyKeyboardMarkup:
@@ -43,5 +43,5 @@ def deposit_methods_reply_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="Main Menu")],
         ],
         resize_keyboard=True,
-        input_field_placeholder="Choose payment method",
+        input_field_placeholder="Select payment method",
     )

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import get_settings
 from bot.keyboards.admin import (
     admin_reply_menu,
+    admin_products_reply_menu,
     delete_product_confirm_reply_menu,
     deposit_review_reply_menu,
     product_admin_actions_reply_menu,
@@ -51,6 +52,43 @@ def _id_from_hash_button(text: str, prefix: str) -> int | None:
         return int(text.rsplit("#", 1)[1].strip())
     except (IndexError, ValueError):
         return None
+
+
+def _method_label(method: str) -> str:
+    labels = {
+        "binance": "Binance",
+        "usdt_trc20": "USDT TRC20",
+        "usdt_bep20": "USDT BEP20",
+        "bkash": "bKash",
+        "nagad": "Nagad",
+        "rocket": "Rocket",
+    }
+    return labels.get(method, method.upper())
+
+
+async def _deposit_details_text(session: AsyncSession, deposit: object, queue_size: int | None = None) -> str:
+    from bot.database.models import User
+
+    user = await session.get(User, deposit.user_id)
+    queue_line = f"\nQueue Size: {queue_size}" if queue_size is not None else ""
+    username = f"@{user.username}" if user and user.username else "not_available"
+    name = user.first_name if user and user.first_name else "Unknown"
+    telegram_id = user.telegram_id if user else "Unknown"
+    return (
+        "Pending Deposit Request\n\n"
+        f"Request ID: #{deposit.id}\n"
+        f"Amount: {money(deposit.amount)}\n"
+        f"Method: {_method_label(deposit.method)}\n"
+        f"Transaction ID: <code>{deposit.transaction_id}</code>\n"
+        f"Status: {deposit.status.value}\n"
+        f"Created: {deposit.created_at:%Y-%m-%d %H:%M}"
+        f"{queue_line}\n\n"
+        "Customer Information\n"
+        f"Name: {name}\n"
+        f"Username: {username}\n"
+        f"Telegram ID: <code>{telegram_id}</code>\n\n"
+        "Verify the payment manually, then approve or reject."
+    )
 
 
 def _looks_like_header(values: list[str]) -> bool:
@@ -98,7 +136,10 @@ async def admin_command(message: Message) -> None:
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    await message.answer("Admin Panel", reply_markup=admin_reply_menu())
+    await message.answer(
+        "Admin Panel\n\nManage products, stock, deposits, coupons, and store statistics.",
+        reply_markup=admin_reply_menu(),
+    )
 
 
 @router.callback_query(F.data == "admin")
@@ -108,7 +149,10 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Unauthorized.", show_alert=True)
         return
     await callback.message.edit_text("Admin Panel")
-    await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
+    await callback.message.answer(
+        "Admin Panel\n\nManage products, stock, deposits, coupons, and store statistics.",
+        reply_markup=admin_reply_menu(),
+    )
     await callback.answer()
 
 
@@ -118,7 +162,10 @@ async def admin_panel_text(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    await message.answer("Admin Panel", reply_markup=admin_reply_menu())
+    await message.answer(
+        "Admin Panel\n\nManage products, stock, deposits, coupons, and store statistics.",
+        reply_markup=admin_reply_menu(),
+    )
 
 
 @router.callback_query(F.data == "admin_stats")
@@ -128,7 +175,7 @@ async def stats(callback: CallbackQuery, session: AsyncSession) -> None:
         return
     data = await admin_stats(session)
     await callback.message.edit_text(
-        "Store Stats\n\n"
+        "Store Statistics\n\n"
         f"Users: {data['users']}\n"
         f"Products: {data['products']}\n"
         f"Unsold stock: {data['stock']}\n"
@@ -147,7 +194,7 @@ async def stats_text(message: Message, session: AsyncSession) -> None:
         return
     data = await admin_stats(session)
     await message.answer(
-        "Store Stats\n\n"
+        "Store Statistics\n\n"
         f"Users: {data['users']}\n"
         f"Products: {data['products']}\n"
         f"Unsold stock: {data['stock']}\n"
@@ -168,12 +215,12 @@ async def admin_products(callback: CallbackQuery, session: AsyncSession) -> None
         await callback.message.edit_text("No products created.")
         await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     else:
-        text = "Products\n\n" + "\n".join(
+        text = "Product List\n\n" + "\n".join(
             f"#{product.id} {product.name} - {money(product.price)} - stock {stock} - {'active' if product.is_active else 'disabled'}"
             for product, stock in rows
         )
         await callback.message.edit_text(text)
-        await callback.message.answer("Use admin actions from the keyboard.", reply_markup=admin_reply_menu())
+        await callback.message.answer("Select a product from the keyboard.", reply_markup=admin_products_reply_menu(rows))
     await callback.answer()
 
 
@@ -186,11 +233,38 @@ async def admin_products_text(message: Message, session: AsyncSession) -> None:
     if not rows:
         await message.answer("No products created.", reply_markup=admin_reply_menu())
     else:
-        text = "Products\n\n" + "\n".join(
+        text = "Product List\n\n" + "\n".join(
             f"#{product.id} {product.name} - {money(product.price)} - stock {stock} - {'active' if product.is_active else 'disabled'}"
             for product, stock in rows
         )
-        await message.answer(text, reply_markup=admin_reply_menu())
+        await message.answer(text, reply_markup=admin_products_reply_menu(rows))
+
+
+@router.message(StateFilter(None), F.text.startswith("Product #"))
+async def admin_product_detail_text(message: Message, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Product #")
+    if not product_id:
+        await message.answer("Invalid product selection.")
+        return
+    rows = await list_all_products(session)
+    product_row = next((row for row in rows if row[0].id == product_id), None)
+    if not product_row:
+        await message.answer("Product not found.", reply_markup=admin_reply_menu())
+        return
+    product, stock_count = product_row
+    await message.answer(
+        f"Product Details\n\n"
+        f"Product ID: #{product.id}\n"
+        f"Name: {product.name}\n"
+        f"Price: {money(product.price)}\n"
+        f"Available Stock: {stock_count}\n"
+        f"Status: {'Active' if product.is_active else 'Disabled'}\n\n"
+        f"Description: {product.description or 'No description provided.'}",
+        reply_markup=product_admin_actions_reply_menu(product.id, product.is_active),
+    )
 
 
 @router.callback_query(F.data.startswith("admin_product:"))
@@ -227,7 +301,7 @@ async def add_product_start_text(message: Message, state: FSMContext) -> None:
         return
     await state.set_state(ProductForm.details)
     await message.answer(
-        "Send product details in this format:\n\n"
+        "Add Product\n\nSend product details in this format:\n\n"
         "Name | Price | Description\n\n"
         "Example:\nGmail Fresh | 120 | Fresh Gmail accounts"
     )
@@ -240,7 +314,7 @@ async def add_product_start(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await state.set_state(ProductForm.details)
     await callback.message.edit_text(
-        "Send product details in this format:\n\n"
+        "Add Product\n\nSend product details in this format:\n\n"
         "Name | Price | Description\n\n"
         "Example:\nGmail Fresh | 2.50 | Fresh Gmail accounts"
     )
@@ -269,16 +343,16 @@ async def add_product_finish(message: Message, state: FSMContext, session: Async
         return
     parts = [part.strip() for part in message.text.split("|", 2)]
     if len(parts) != 3:
-        await message.answer("Invalid format. Use: Name | Price | Description")
+        await message.answer("Invalid format.\n\nUse: Name | Price | Description")
         return
     try:
         product = await create_product(session, parts[0], float(parts[1]), parts[2])
     except ValueError:
-        await message.answer("Price must be a number.")
+        await message.answer("Product price must be a valid number.")
         return
     await state.clear()
     await message.answer(
-        f"Created product #{product.id}: {product.name}",
+        f"Product Created\n\nProduct ID: #{product.id}\nName: {product.name}\nPrice: {money(product.price)}",
         reply_markup=product_admin_actions_reply_menu(product.id, True),
     )
 
@@ -325,16 +399,11 @@ async def deposits_text(message: Message, session: AsyncSession) -> None:
         return
     rows = await pending_deposits(session)
     if not rows:
-        await message.answer("No pending deposits.", reply_markup=admin_reply_menu())
+        await message.answer("Deposits\n\nNo pending deposit requests.", reply_markup=admin_reply_menu())
     else:
         first = rows[0]
         await message.answer(
-            f"Pending deposit #{first.id}\n\n"
-            f"User ID: {first.user_id}\n"
-            f"Amount: {money(first.amount)}\n"
-            f"Method: {first.method}\n"
-            f"TXID: {first.transaction_id}\n\n"
-            f"Queue size: {len(rows)}",
+            await _deposit_details_text(session, first, len(rows)),
             reply_markup=deposit_review_reply_menu(first.id),
         )
 
@@ -392,7 +461,7 @@ async def stock_payload_file(message: Message, state: FSMContext, session: Async
     document = message.document
     file_name = document.file_name or ""
     if not file_name.lower().endswith(SUPPORTED_STOCK_EXTENSIONS):
-        await message.answer("Upload only .xlsx, .csv, or .txt stock files.")
+        await message.answer("Unsupported file type. Please upload only .xlsx, .csv, or .txt stock files.")
         return
 
     buffer = BytesIO()
@@ -404,14 +473,14 @@ async def stock_payload_file(message: Message, state: FSMContext, session: Async
         return
 
     if not lines:
-        await message.answer("No stock lines found in this file.")
+        await message.answer("No valid stock lines found in this file.")
         return
 
     data = await state.get_data()
     count = await add_stock(session, int(data["product_id"]), lines)
     await state.clear()
     await message.answer(
-        f"Uploaded {file_name} and added {count} stock item(s).",
+        f"Stock Uploaded\n\nFile: {file_name}\nAdded Items: {count}",
         reply_markup=admin_reply_menu(),
     )
 
@@ -426,7 +495,7 @@ async def stock_payload(message: Message, state: FSMContext, session: AsyncSessi
     data = await state.get_data()
     count = await add_stock(session, int(data["product_id"]), message.text.splitlines())
     await state.clear()
-    await message.answer(f"Added {count} stock item(s).", reply_markup=admin_reply_menu())
+    await message.answer(f"Stock Added\n\nAdded Items: {count}", reply_markup=admin_reply_menu())
 
 
 @router.callback_query(F.data.startswith("admin_toggle_product:"))
@@ -542,18 +611,11 @@ async def deposits(callback: CallbackQuery, session: AsyncSession) -> None:
         return
     rows = await pending_deposits(session)
     if not rows:
-        await callback.message.edit_text("No pending deposits.")
+        await callback.message.edit_text("Deposits\n\nNo pending deposit requests.")
         await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     else:
         first = rows[0]
-        await callback.message.edit_text(
-            f"Pending deposit #{first.id}\n\n"
-            f"User ID: {first.user_id}\n"
-            f"Amount: {money(first.amount)}\n"
-            f"Method: {first.method}\n"
-            f"TXID: {first.transaction_id}\n\n"
-            f"Queue size: {len(rows)}",
-        )
+        await callback.message.edit_text(await _deposit_details_text(session, first, len(rows)))
         await callback.message.answer("Review deposit.", reply_markup=deposit_review_reply_menu(first.id))
     await callback.answer()
 
@@ -568,6 +630,23 @@ async def review_deposit_callback(callback: CallbackQuery, session: AsyncSession
     if not deposit:
         await callback.answer("Deposit not found or already reviewed.", show_alert=True)
         return
+    from bot.database.models import User
+
+    user = await session.get(User, deposit.user_id)
+    if user:
+        approve = action == "deposit_approve"
+        status_text = "approved" if approve else "rejected"
+        try:
+            await callback.bot.send_message(
+                user.telegram_id,
+                "Deposit Update\n\n"
+                f"Request ID: #{deposit.id}\n"
+                f"Amount: {money(deposit.amount)}\n"
+                f"Status: {status_text}\n\n"
+                + ("Your balance has been updated." if approve else "Please contact support if this was a mistake."),
+            )
+        except Exception:
+            pass
     await callback.message.edit_text(f"Deposit #{deposit.id} {deposit.status.value}.")
     await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
     await callback.answer()
@@ -588,7 +667,26 @@ async def review_deposit_text(message: Message, session: AsyncSession) -> None:
     if not deposit:
         await message.answer("Deposit not found or already reviewed.", reply_markup=admin_reply_menu())
         return
-    await message.answer(f"Deposit #{deposit.id} {deposit.status.value}.", reply_markup=admin_reply_menu())
+    from bot.database.models import User
+
+    user = await session.get(User, deposit.user_id)
+    if user:
+        status_text = "approved" if approve else "rejected"
+        try:
+            await message.bot.send_message(
+                user.telegram_id,
+                "Deposit Update\n\n"
+                f"Request ID: #{deposit.id}\n"
+                f"Amount: {money(deposit.amount)}\n"
+                f"Status: {status_text}\n\n"
+                + ("Your balance has been updated." if approve else "Please contact support if this was a mistake."),
+            )
+        except Exception:
+            pass
+    await message.answer(
+        f"Deposit Reviewed\n\nRequest ID: #{deposit.id}\nStatus: {deposit.status.value}\nAmount: {money(deposit.amount)}",
+        reply_markup=admin_reply_menu(),
+    )
 
 
 @router.callback_query(F.data == "admin_add_coupon")
