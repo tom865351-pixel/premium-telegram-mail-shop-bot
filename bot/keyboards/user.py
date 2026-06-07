@@ -20,7 +20,7 @@ def main_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
 
 def products_reply_menu(products: list[tuple[object, int]], is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = []
-    product_buttons = [KeyboardButton(text=product.name) for product, _ in products]
+    product_buttons = [KeyboardButton(text=f"🛒 {product.name}") for product, _ in products]
     for index in range(0, len(product_buttons), 2):
         rows.append(product_buttons[index : index + 2])
     rows.append([KeyboardButton(text="🏠 Main Menu")])

@@ -234,6 +234,34 @@ def deposit_admin_text(deposit: object, user: object) -> str:
     )
 
 
+def clean_button_text(text: str) -> str:
+    prefixes = (
+        "🛒 ",
+        "📦 ",
+        "🛍 ",
+        "💳 ",
+        "👤 ",
+        "🎁 ",
+        "🏷 ",
+        "☎️ ",
+        "⚙️ ",
+        "🏠 ",
+        "🟡 ",
+        "💵 ",
+        "📱 ",
+        "🚀 ",
+    )
+    cleaned = text.strip()
+    changed = True
+    while changed:
+        changed = False
+        for prefix in prefixes:
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix) :].strip()
+                changed = True
+    return cleaned
+
+
 async def send_menu(message: Message, session: AsyncSession, referral_code: str | None = None) -> None:
     settings = get_settings()
     user = await get_or_create_user(session, message.from_user, referral_code)
@@ -462,6 +490,7 @@ async def send_product_detail_message(
     state: FSMContext,
     product_name: str,
 ) -> bool:
+    product_name = clean_button_text(product_name)
     product_rows = await list_active_products(session)
     product_row = next((row for row in product_rows if row[0].name.lower() == product_name.lower()), None)
     if not product_row:

@@ -242,13 +242,13 @@ async def admin_products_text(message: Message, session: AsyncSession, state: FS
         await message.answer(text, reply_markup=admin_products_reply_menu(rows))
 
 
-@router.message(StateFilter("*"), F.text.startswith("Product #"))
+@router.message(StateFilter("*"), F.text.func(lambda text: text.startswith(("Product #", "📦 Product #"))))
 async def admin_product_detail_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    product_id = _id_from_hash_button(message.text, "Product #")
+    product_id = _id_from_hash_button(message.text, "Product #") or _id_from_hash_button(message.text, "📦 Product #")
     if not product_id:
         await message.answer("Invalid product selection.")
         return
