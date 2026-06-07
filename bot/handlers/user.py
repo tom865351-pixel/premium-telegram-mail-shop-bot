@@ -12,6 +12,7 @@ from bot.config import get_settings
 from bot.keyboards.user import (
     back_menu,
     deposit_methods,
+    deposit_methods_reply_menu,
     main_reply_menu,
     product_buy_menu,
     products_reply_menu,
@@ -41,6 +42,21 @@ RESERVED_REPLY_TEXTS = {
     "Deposits",
     "Coupons",
     "Stats",
+    "Binance",
+    "USDT TRC20",
+    "USDT BEP20",
+    "bKash",
+    "Nagad",
+    "Rocket",
+}
+
+DEPOSIT_METHOD_TEXTS = {
+    "Binance": "binance",
+    "USDT TRC20": "usdt_trc20",
+    "USDT BEP20": "usdt_bep20",
+    "bKash": "bkash",
+    "Nagad": "nagad",
+    "Rocket": "rocket",
 }
 
 
@@ -300,7 +316,7 @@ async def deposit(callback: CallbackQuery) -> None:
 
 @router.message(StateFilter(None), F.text == "Deposit")
 async def deposit_text(message: Message) -> None:
-    await message.answer("Choose a deposit method.", reply_markup=deposit_methods())
+    await message.answer("Choose a deposit method.", reply_markup=deposit_methods_reply_menu())
 
 
 @router.callback_query(F.data.startswith("deposit_method:"))
@@ -310,6 +326,14 @@ async def deposit_method(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(DepositForm.amount)
     await callback.message.edit_text("Enter deposit amount.", reply_markup=back_menu())
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text.in_(DEPOSIT_METHOD_TEXTS.keys()))
+async def deposit_method_text(message: Message, state: FSMContext) -> None:
+    method = DEPOSIT_METHOD_TEXTS[message.text]
+    await state.update_data(method=method)
+    await state.set_state(DepositForm.amount)
+    await message.answer("Enter deposit amount.")
 
 
 @router.message(DepositForm.amount)

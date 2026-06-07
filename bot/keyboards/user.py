@@ -94,3 +94,16 @@ def deposit_methods() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Back", callback_data="menu")],
         ]
     )
+
+
+def deposit_methods_reply_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Binance"), KeyboardButton(text="USDT TRC20")],
+            [KeyboardButton(text="USDT BEP20"), KeyboardButton(text="bKash")],
+            [KeyboardButton(text="Nagad"), KeyboardButton(text="Rocket")],
+            [KeyboardButton(text="Main Menu")],
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Choose payment method",
+    )
