@@ -6,11 +6,11 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
-from bot.keyboards.admin import admin_menu, deposit_review, product_admin_actions
+from bot.keyboards.admin import admin_menu, admin_product_list, delete_product_confirm, deposit_review, product_admin_actions
 from bot.keyboards.user import back_menu
 from bot.services.coupons import create_coupon
 from bot.services.deposits import pending_deposits, review_deposit
-from bot.services.products import add_stock, create_product, list_all_products, toggle_product
+from bot.services.products import add_stock, create_product, delete_product, list_all_products, toggle_product
 from bot.services.stats import admin_stats
 from bot.utils.formatting import money
 
@@ -84,7 +84,31 @@ async def admin_products(callback: CallbackQuery, session: AsyncSession) -> None
             f"#{product.id} {product.name} - {money(product.price)} - stock {stock} - {'active' if product.is_active else 'disabled'}"
             for product, stock in rows
         )
-        await callback.message.edit_text(text, reply_markup=admin_menu())
+        await callback.message.edit_text(text, reply_markup=admin_product_list(rows))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_product:"))
+async def admin_product_detail(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Unauthorized.", show_alert=True)
+        return
+    product_id = int(callback.data.split(":", 1)[1])
+    rows = await list_all_products(session)
+    product_row = next((row for row in rows if row[0].id == product_id), None)
+    if not product_row:
+        await callback.answer("Product not found.", show_alert=True)
+        return
+    product, stock_count = product_row
+    await callback.message.edit_text(
+        f"Product #{product.id}\n\n"
+        f"Name: {product.name}\n"
+        f"Price: {money(product.price)}\n"
+        f"Stock: {stock_count}\n"
+        f"Status: {'active' if product.is_active else 'disabled'}\n\n"
+        f"{product.description}",
+        reply_markup=product_admin_actions(product.id, product.is_active),
+    )
     await callback.answer()
 
 
@@ -147,7 +171,7 @@ async def add_stock_for_product(callback: CallbackQuery, state: FSMContext) -> N
     await state.update_data(product_id=product_id)
     await state.set_state(StockForm.payload)
     await callback.message.edit_text(
-        "Send stock lines, one per line.\n\n"
+        "Send bulk stock lines, one item per line.\n\n"
         "email1@example.com|password1\nemail2@example.com|password2",
         reply_markup=back_menu(),
     )
@@ -166,7 +190,7 @@ async def stock_product_id(message: Message, state: FSMContext) -> None:
     await state.update_data(product_id=product_id)
     await state.set_state(StockForm.payload)
     await message.answer(
-        "Send stock lines, one per line.\n\n"
+        "Send bulk stock lines, one item per line.\n\n"
         "email1@example.com|password1\nemail2@example.com|password2"
     )
 
@@ -195,6 +219,34 @@ async def admin_toggle(callback: CallbackQuery, session: AsyncSession) -> None:
         f"{product.name} is now {'active' if product.is_active else 'disabled'}.",
         reply_markup=product_admin_actions(product.id, product.is_active),
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_delete_product:"))
+async def admin_delete_product(callback: CallbackQuery) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Unauthorized.", show_alert=True)
+        return
+    product_id = int(callback.data.split(":", 1)[1])
+    await callback.message.edit_text(
+        "Delete this product?\n\n"
+        "If this product already has orders, it will be disabled and only unsold stock will be removed.",
+        reply_markup=delete_product_confirm(product_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_delete_product_confirm:"))
+async def admin_delete_product_finish(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Unauthorized.", show_alert=True)
+        return
+    product_id = int(callback.data.split(":", 1)[1])
+    ok, text = await delete_product(session, product_id)
+    if not ok:
+        await callback.answer(text, show_alert=True)
+        return
+    await callback.message.edit_text(text, reply_markup=admin_menu())
     await callback.answer()
 
 

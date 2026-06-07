@@ -2,17 +2,17 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
-from bot.keyboards.user import back_menu, deposit_methods, main_menu
+from bot.keyboards.user import back_menu, deposit_methods, main_menu, product_buy_menu, products_menu
 from bot.services.coupons import redeem_coupon
 from bot.services.deposits import create_deposit
-from bot.services.orders import order_count, purchase_product, recent_orders
+from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders
 from bot.services.products import list_active_products
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.utils.formatting import clean_support_username, money
+from aiogram.types import CallbackQuery, Message
 
 router = Router()
 
@@ -26,19 +26,8 @@ class CouponForm(StatesGroup):
     code = State()
 
 
-def product_keyboard(products: list[tuple[object, int]]) -> InlineKeyboardMarkup:
-    rows = []
-    for product, stock_count in products:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=f"{product.name} - {money(product.price)} ({stock_count})",
-                    callback_data=f"buy:{product.id}",
-                )
-            ]
-        )
-    rows.append([InlineKeyboardButton(text="Back", callback_data="menu")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+class BulkBuyForm(StatesGroup):
+    quantity = State()
 
 
 async def send_menu(message: Message, session: AsyncSession, referral_code: str | None = None) -> None:
@@ -90,11 +79,31 @@ async def products(callback: CallbackQuery, session: AsyncSession) -> None:
     if not product_rows:
         await callback.message.edit_text("No products available right now.", reply_markup=back_menu())
     else:
-        await callback.message.edit_text("Available Products", reply_markup=product_keyboard(product_rows))
+        await callback.message.edit_text("Choose a product.", reply_markup=products_menu(product_rows))
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("buy:"))
+@router.callback_query(F.data.startswith("product:"))
+async def product_detail(callback: CallbackQuery, session: AsyncSession) -> None:
+    product_id = int(callback.data.split(":", 1)[1])
+    product_rows = await list_active_products(session)
+    product_row = next((row for row in product_rows if row[0].id == product_id), None)
+    if not product_row:
+        await callback.answer("Product is unavailable.", show_alert=True)
+        return
+
+    product, stock_count = product_row
+    await callback.message.edit_text(
+        f"{product.name}\n\n"
+        f"Price: {money(product.price)}\n"
+        f"File Stock: {stock_count}\n\n"
+        f"{product.description or 'Choose single buy or bulk buy.'}",
+        reply_markup=product_buy_menu(product.id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("buy_one:"))
 async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
     product_id = int(callback.data.split(":", 1)[1])
     user = await get_or_create_user(session, callback.from_user)
@@ -109,6 +118,40 @@ async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
         f"<code>{stock_item.payload}</code>",
     )
     await callback.answer("Delivered.")
+
+
+@router.callback_query(F.data.startswith("bulk_buy:"))
+async def bulk_buy_start(callback: CallbackQuery, state: FSMContext) -> None:
+    product_id = int(callback.data.split(":", 1)[1])
+    await state.update_data(product_id=product_id)
+    await state.set_state(BulkBuyForm.quantity)
+    await callback.message.edit_text("Send bulk quantity. Minimum 2 items.", reply_markup=back_menu())
+    await callback.answer()
+
+
+@router.message(BulkBuyForm.quantity)
+async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    try:
+        quantity = int(message.text)
+    except (TypeError, ValueError):
+        await message.answer("Send a whole number, for example 5.")
+        return
+
+    data = await state.get_data()
+    user = await get_or_create_user(session, message.from_user)
+    ok, text, stock_items = await purchase_product_bulk(session, user, int(data["product_id"]), quantity)
+    if not ok:
+        await message.answer(text)
+        return
+
+    await state.clear()
+    payload = "\n".join(f"{index}. {item.payload}" for index, item in enumerate(stock_items, start=1))
+    await message.answer(
+        f"{text}\n\n"
+        f"Delivered {len(stock_items)} item(s):\n"
+        f"<code>{payload}</code>",
+        reply_markup=main_menu(message.from_user.id in get_settings().admin_ids),
+    )
 
 
 @router.callback_query(F.data == "orders")

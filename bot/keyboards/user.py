@@ -4,16 +4,16 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [
-            InlineKeyboardButton(text="Dashboard", callback_data="dashboard"),
-            InlineKeyboardButton(text="Products", callback_data="products"),
+            InlineKeyboardButton(text="Shop Now", callback_data="products"),
+            InlineKeyboardButton(text="Deposit", callback_data="deposit"),
         ],
         [
-            InlineKeyboardButton(text="Deposit", callback_data="deposit"),
-            InlineKeyboardButton(text="Orders", callback_data="orders"),
+            InlineKeyboardButton(text="Profile", callback_data="dashboard"),
+            InlineKeyboardButton(text="Refer", callback_data="referral"),
         ],
         [
             InlineKeyboardButton(text="Coupon", callback_data="coupon"),
-            InlineKeyboardButton(text="Referral", callback_data="referral"),
+            InlineKeyboardButton(text="Orders", callback_data="orders"),
         ],
         [InlineKeyboardButton(text="Support", callback_data="support")],
     ]
@@ -24,6 +24,33 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
 
 def back_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="menu")]])
+
+
+def products_menu(products: list[tuple[object, int]]) -> InlineKeyboardMarkup:
+    rows = []
+    for product, stock_count in products:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{product.name} | Stock {stock_count}",
+                    callback_data=f"product:{product.id}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="Back", callback_data="menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def product_buy_menu(product_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Single Buy", callback_data=f"buy_one:{product_id}"),
+                InlineKeyboardButton(text="Bulk Buy", callback_data=f"bulk_buy:{product_id}"),
+            ],
+            [InlineKeyboardButton(text="Back", callback_data="products")],
+        ]
+    )
 
 
 def deposit_methods() -> InlineKeyboardMarkup:

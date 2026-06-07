@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import Product, StockItem
+from bot.database.models import Order, Product, StockItem
 
 
 async def list_active_products(session: AsyncSession) -> list[tuple[Product, int]]:
@@ -52,6 +52,26 @@ async def toggle_product(session: AsyncSession, product_id: int) -> Product | No
     return product
 
 
+async def delete_product(session: AsyncSession, product_id: int) -> tuple[bool, str]:
+    product = await session.get(Product, product_id)
+    if not product:
+        return False, "Product not found."
+
+    order_count = int(await session.scalar(select(func.count(Order.id)).where(Order.product_id == product_id)) or 0)
+    if order_count:
+        product.is_active = False
+        await session.execute(
+            delete(StockItem).where(StockItem.product_id == product_id, StockItem.is_sold.is_(False))
+        )
+        await session.commit()
+        return True, "Product had old orders, so it was disabled and unsold stock was removed."
+
+    await session.execute(delete(StockItem).where(StockItem.product_id == product_id))
+    await session.delete(product)
+    await session.commit()
+    return True, "Product deleted."
+
+
 async def reserve_stock_item(session: AsyncSession, product_id: int) -> StockItem | None:
     stock_item = await session.scalar(
         select(StockItem)
@@ -64,3 +84,18 @@ async def reserve_stock_item(session: AsyncSession, product_id: int) -> StockIte
         stock_item.is_sold = True
         stock_item.sold_at = datetime.utcnow()
     return stock_item
+
+
+async def reserve_stock_items(session: AsyncSession, product_id: int, quantity: int) -> list[StockItem]:
+    result = await session.execute(
+        select(StockItem)
+        .where(StockItem.product_id == product_id, StockItem.is_sold.is_(False))
+        .order_by(StockItem.id)
+        .with_for_update(skip_locked=True)
+        .limit(quantity)
+    )
+    stock_items = list(result.scalars().all())
+    for stock_item in stock_items:
+        stock_item.is_sold = True
+        stock_item.sold_at = datetime.utcnow()
+    return stock_items

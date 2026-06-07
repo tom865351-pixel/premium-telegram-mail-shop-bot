@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
 from bot.database.models import Order, Product, ReferralReward, StockItem, User
-from bot.services.products import reserve_stock_item
+from bot.services.products import reserve_stock_item, reserve_stock_items
 
 
 async def purchase_product(session: AsyncSession, user: User, product_id: int) -> tuple[bool, str, StockItem | None]:
@@ -43,6 +43,61 @@ async def purchase_product(session: AsyncSession, user: User, product_id: int) -
 
     await session.commit()
     return True, "Purchase completed.", stock_item
+
+
+async def purchase_product_bulk(
+    session: AsyncSession,
+    user: User,
+    product_id: int,
+    quantity: int,
+) -> tuple[bool, str, list[StockItem]]:
+    if quantity < 2:
+        return False, "Bulk buy quantity must be at least 2.", []
+
+    product = await session.get(Product, product_id)
+    if not product or not product.is_active:
+        return False, "Product is unavailable.", []
+
+    unit_price = float(product.price)
+    total_price = round(unit_price * quantity, 2)
+    if float(user.balance) < total_price:
+        return False, f"Insufficient balance. Need {total_price:.2f}.", []
+
+    stock_items = await reserve_stock_items(session, product_id, quantity)
+    if len(stock_items) < quantity:
+        await session.rollback()
+        return False, f"Only {len(stock_items)} item(s) available in stock.", []
+
+    user.balance = float(user.balance) - total_price
+    orders = []
+    for stock_item in stock_items:
+        order = Order(user_id=user.id, product_id=product.id, stock_item_id=stock_item.id, amount=unit_price)
+        session.add(order)
+        orders.append((order, stock_item))
+
+    await session.flush()
+    for order, stock_item in orders:
+        stock_item.sold_order_id = order.id
+
+    if user.referred_by_id:
+        settings = get_settings()
+        reward_amount = round(total_price * settings.referral_commission_percent / 100, 2)
+        if reward_amount > 0:
+            referrer = await session.get(User, user.referred_by_id)
+            if referrer:
+                referrer.balance = float(referrer.balance) + reward_amount
+                for order, _ in orders:
+                    session.add(
+                        ReferralReward(
+                            referrer_id=referrer.id,
+                            referred_user_id=user.id,
+                            order_id=order.id,
+                            amount=round(float(order.amount) * settings.referral_commission_percent / 100, 2),
+                        )
+                    )
+
+    await session.commit()
+    return True, "Bulk purchase completed.", stock_items
 
 
 async def recent_orders(session: AsyncSession, user_id: int, limit: int = 10) -> list[Order]:
