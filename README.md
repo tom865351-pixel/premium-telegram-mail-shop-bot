@@ -67,6 +67,7 @@ Production-ready Telegram marketplace bot for selling email account stock with P
 ```env
 BOT_TOKEN=your_bot_token
 DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database
+DATABASE_PUBLIC_URL=
 ADMIN_IDS=your_telegram_user_id
 BINANCE_PAY_ID=...
 USDT_TRC20_ADDRESS=...
@@ -76,9 +77,11 @@ NAGAD_NUMBER=...
 ROCKET_NUMBER=...
 REFERRAL_COMMISSION_PERCENT=10
 SUPPORT_USERNAME=your_support
-MIN_DEPOSIT=1.0
-CURRENCY_SYMBOL=$
+MIN_DEPOSIT=100
+CURRENCY_SYMBOL=TK
 ```
+
+On Railway, set `DATABASE_URL` as a reference to your PostgreSQL service. If the bot logs show a hostname error for `postgres.railway.internal`, also set `DATABASE_PUBLIC_URL` from the PostgreSQL service and redeploy.
 
 ## Admin Usage
 

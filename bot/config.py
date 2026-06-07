@@ -1,12 +1,13 @@
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     bot_token: str = Field(alias="BOT_TOKEN")
     database_url: str = Field(alias="DATABASE_URL")
+    database_public_url: str | None = Field(default=None, alias="DATABASE_PUBLIC_URL")
     admin_ids: set[int] = Field(default_factory=set, alias="ADMIN_IDS")
 
     binance_pay_id: str | None = Field(default=None, alias="BINANCE_PAY_ID")
@@ -40,6 +41,21 @@ class Settings(BaseSettings):
         if value.startswith("postgresql://"):
             return value.replace("postgresql://", "postgresql+asyncpg://", 1)
         return value
+
+    @field_validator("database_public_url", mode="before")
+    @classmethod
+    def normalize_database_public_url(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
+
+    @model_validator(mode="after")
+    def prefer_public_database_url_when_needed(self) -> "Settings":
+        if self.database_public_url and ".railway.internal" in self.database_url:
+            self.database_url = self.database_public_url
+        return self
 
 
 @lru_cache

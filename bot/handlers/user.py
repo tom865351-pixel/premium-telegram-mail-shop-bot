@@ -1,7 +1,11 @@
+from io import BytesIO
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from openpyxl import Workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
@@ -12,7 +16,6 @@ from bot.services.orders import order_count, purchase_product, purchase_product_
 from bot.services.products import list_active_products
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.utils.formatting import clean_support_username, money
-from aiogram.types import CallbackQuery, Message
 
 router = Router()
 
@@ -28,6 +31,30 @@ class CouponForm(StatesGroup):
 
 class BulkBuyForm(StatesGroup):
     quantity = State()
+
+
+def build_bulk_delivery_file(stock_items: list[object]) -> BufferedInputFile:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Accounts"
+    worksheet.append(["No", "Email/Username", "Password", "Full Account"])
+
+    for index, item in enumerate(stock_items, start=1):
+        payload = item.payload.strip()
+        username, password = payload, ""
+        if "|" in payload:
+            username, password = [part.strip() for part in payload.split("|", 1)]
+        worksheet.append([index, username, password, payload])
+
+    worksheet.column_dimensions["A"].width = 8
+    worksheet.column_dimensions["B"].width = 36
+    worksheet.column_dimensions["C"].width = 24
+    worksheet.column_dimensions["D"].width = 56
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return BufferedInputFile(output.read(), filename="bulk_accounts.xlsx")
 
 
 async def send_menu(message: Message, session: AsyncSession, referral_code: str | None = None) -> None:
@@ -145,11 +172,10 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
         return
 
     await state.clear()
-    payload = "\n".join(f"{index}. {item.payload}" for index, item in enumerate(stock_items, start=1))
-    await message.answer(
-        f"{text}\n\n"
-        f"Delivered {len(stock_items)} item(s):\n"
-        f"<code>{payload}</code>",
+    delivery_file = build_bulk_delivery_file(stock_items)
+    await message.answer_document(
+        delivery_file,
+        caption=f"{text}\n\nDelivered {len(stock_items)} item(s) in Excel file.",
         reply_markup=main_menu(message.from_user.id in get_settings().admin_ids),
     )
 
