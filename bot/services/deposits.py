@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import datetime, time
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import Deposit, DepositStatus, User
@@ -44,3 +44,15 @@ async def review_deposit(session: AsyncSession, deposit_id: int, approve: bool) 
     await session.commit()
     await session.refresh(deposit)
     return deposit
+
+
+async def deposited_today(session: AsyncSession, user_id: int) -> float:
+    today_start = datetime.combine(datetime.utcnow().date(), time.min)
+    total = await session.scalar(
+        select(func.coalesce(func.sum(Deposit.amount), 0)).where(
+            Deposit.user_id == user_id,
+            Deposit.status == DepositStatus.APPROVED,
+            Deposit.reviewed_at >= today_start,
+        )
+    )
+    return float(total or 0)

@@ -12,8 +12,8 @@ from bot.config import get_settings
 from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu
 from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
 from bot.services.coupons import redeem_coupon
-from bot.services.deposits import create_deposit
-from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders
+from bot.services.deposits import create_deposit, deposited_today
+from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
 from bot.services.products import list_active_products
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.utils.formatting import clean_support_username, money
@@ -262,6 +262,22 @@ def clean_button_text(text: str) -> str:
     return cleaned
 
 
+async def profile_text(session: AsyncSession, user: object) -> str:
+    username = f"@{user.username}" if user.username else "Not set"
+    today_deposit = await deposited_today(session, user.id)
+    today_spent = await spent_today(session, user.id)
+    lifetime_spent = await total_spent(session, user.id)
+    return (
+        f"👤 Name: {user.first_name or 'Unknown'}\n"
+        f"🆔 User ID: {user.telegram_id}\n"
+        f"👤 Username: {username}\n"
+        f"💰 Balance: {money(user.balance)}\n"
+        f"💵 Deposited today: {money(today_deposit)}\n"
+        f"🧾 Spent today: {money(today_spent)}\n"
+        f"📦 Total spent: {money(lifetime_spent)}"
+    )
+
+
 async def send_menu(message: Message, session: AsyncSession, referral_code: str | None = None) -> None:
     settings = get_settings()
     user = await get_or_create_user(session, message.from_user, referral_code)
@@ -318,17 +334,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         return
 
     if selected == "Profile":
-        orders = await order_count(session, user.id)
-        await message.answer(
-            panel(
-                "MY PROFILE",
-                f"Telegram ID: <code>{user.telegram_id}</code>",
-                f"Balance: {money(user.balance)}",
-                f"Total Orders: {orders}",
-                f"Referral Code: <code>{user.referral_code}</code>",
-            ),
-            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
-        )
+        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
         return
 
     if selected == "Orders":
@@ -403,14 +409,7 @@ async def menu_text(message: Message, session: AsyncSession, state: FSMContext) 
 @router.callback_query(F.data == "dashboard")
 async def dashboard(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_or_create_user(session, callback.from_user)
-    orders = await order_count(session, user.id)
-    await callback.message.edit_text(
-        "Account Profile\n\n"
-        f"Telegram ID: <code>{user.telegram_id}</code>\n"
-        f"Balance: {money(user.balance)}\n"
-        f"Total Orders: {orders}\n"
-        f"Referral Code: <code>{user.referral_code}</code>",
-    )
+    await callback.message.edit_text(await profile_text(session, user))
     await callback.message.answer("Menu", reply_markup=main_reply_menu(callback.from_user.id in get_settings().admin_ids))
     await callback.answer()
 
@@ -418,15 +417,7 @@ async def dashboard(callback: CallbackQuery, session: AsyncSession) -> None:
 @router.message(StateFilter(None), F.text == "Profile")
 async def dashboard_text(message: Message, session: AsyncSession) -> None:
     user = await get_or_create_user(session, message.from_user)
-    orders = await order_count(session, user.id)
-    await message.answer(
-        "Account Profile\n\n"
-        f"Telegram ID: <code>{user.telegram_id}</code>\n"
-        f"Balance: {money(user.balance)}\n"
-        f"Total Orders: {orders}\n"
-        f"Referral Code: <code>{user.referral_code}</code>",
-        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
-    )
+    await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
 
 
 @router.callback_query(F.data == "products")

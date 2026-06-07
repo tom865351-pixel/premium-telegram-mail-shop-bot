@@ -1,3 +1,5 @@
+from datetime import datetime, time
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,3 +114,21 @@ async def recent_orders(session: AsyncSession, user_id: int, limit: int = 10) ->
 
 async def order_count(session: AsyncSession, user_id: int) -> int:
     return int(await session.scalar(select(func.count(Order.id)).where(Order.user_id == user_id)) or 0)
+
+
+async def spent_today(session: AsyncSession, user_id: int) -> float:
+    today_start = datetime.combine(datetime.utcnow().date(), time.min)
+    total = await session.scalar(
+        select(func.coalesce(func.sum(Order.amount), 0)).where(
+            Order.user_id == user_id,
+            Order.created_at >= today_start,
+        )
+    )
+    return float(total or 0)
+
+
+async def total_spent(session: AsyncSession, user_id: int) -> float:
+    total = await session.scalar(
+        select(func.coalesce(func.sum(Order.amount), 0)).where(Order.user_id == user_id)
+    )
+    return float(total or 0)
