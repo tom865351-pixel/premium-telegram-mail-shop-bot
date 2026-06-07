@@ -12,7 +12,8 @@ from bot.config import get_settings
 from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu
 from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
 from bot.services.coupons import redeem_coupon
-from bot.services.deposits import create_deposit, deposited_today
+from bot.database.models import DepositStatus
+from bot.services.deposits import create_deposit, deposited_today, txid_exists
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
 from bot.services.products import list_active_products
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
@@ -218,10 +219,16 @@ def user_label(user: object) -> str:
     return f"{name} ({username})"
 
 
-def deposit_admin_text(deposit: object, user: object) -> str:
+def deposit_admin_text(deposit: object, user: object, auto_approved: bool = False) -> str:
     method = DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())
+    title = "Auto Approved Deposit" if auto_approved else "New Deposit Request"
+    footer = (
+        "Balance was added automatically by semi-auto rules."
+        if auto_approved
+        else "Please verify the payment before approving."
+    )
     return (
-        "New Deposit Request\n\n"
+        f"{title}\n\n"
         f"Request ID: #{deposit.id}\n"
         f"Amount: {money(deposit.amount)}\n"
         f"Method: {method}\n"
@@ -230,7 +237,7 @@ def deposit_admin_text(deposit: object, user: object) -> str:
         f"Name: {user.first_name or 'Unknown'}\n"
         f"Username: @{user.username if user.username else 'not_available'}\n"
         f"Telegram ID: <code>{user.telegram_id}</code>\n\n"
-        "Please verify the payment before approving."
+        f"{footer}"
     )
 
 
@@ -676,32 +683,59 @@ async def deposit_amount(message: Message, state: FSMContext) -> None:
 async def deposit_transaction(message: Message, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
     user = await get_or_create_user(session, message.from_user)
+    txid = message.text.strip()
+    if len(txid) < 4:
+        await message.answer("Transaction ID is too short. Please send a valid transaction ID/reference.")
+        return
+    if await txid_exists(session, txid):
+        await state.clear()
+        await message.answer(
+            "Duplicate Transaction ID\n\n"
+            "This transaction ID has already been submitted. If this is a mistake, please contact support.",
+            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        )
+        return
+
+    settings = get_settings()
+    amount = float(data["amount"])
+    auto_approved = settings.semi_auto_deposit_enabled and amount <= settings.semi_auto_deposit_max_amount
     deposit = await create_deposit(
         session=session,
         user_id=user.id,
-        amount=float(data["amount"]),
+        amount=amount,
         method=data["method"],
-        transaction_id=message.text.strip(),
+        transaction_id=txid,
+        status=DepositStatus.APPROVED if auto_approved else DepositStatus.PENDING,
     )
     await state.clear()
-    settings = get_settings()
     for admin_id in settings.admin_ids:
         try:
             await message.bot.send_message(
                 admin_id,
-                deposit_admin_text(deposit, user),
-                reply_markup=deposit_review_reply_menu(deposit.id),
+                deposit_admin_text(deposit, user, auto_approved=auto_approved),
+                reply_markup=None if auto_approved else deposit_review_reply_menu(deposit.id),
             )
         except Exception:
             pass
-    await message.answer(
-        "Deposit Request Submitted\n\n"
-        f"Request ID: #{deposit.id}\n"
-        f"Amount: {money(deposit.amount)}\n"
-        f"Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n\n"
-        "Your request has been sent to admin for verification.",
-        reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
-    )
+    if auto_approved:
+        await message.answer(
+            "Deposit Approved\n\n"
+            f"Request ID: #{deposit.id}\n"
+            f"Amount: {money(deposit.amount)}\n"
+            f"Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n"
+            f"Transaction ID: <code>{deposit.transaction_id}</code>\n\n"
+            "Your balance has been updated automatically.",
+            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+        )
+    else:
+        await message.answer(
+            "Deposit Request Submitted\n\n"
+            f"Request ID: #{deposit.id}\n"
+            f"Amount: {money(deposit.amount)}\n"
+            f"Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n\n"
+            "This deposit needs admin verification before balance is added.",
+            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+        )
 
 
 @router.callback_query(F.data == "coupon")

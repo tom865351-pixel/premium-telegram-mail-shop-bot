@@ -79,9 +79,13 @@ REFERRAL_COMMISSION_PERCENT=10
 SUPPORT_USERNAME=your_support
 MIN_DEPOSIT=100
 CURRENCY_SYMBOL=TK
+SEMI_AUTO_DEPOSIT_ENABLED=true
+SEMI_AUTO_DEPOSIT_MAX_AMOUNT=300
 ```
 
 On Railway, set `DATABASE_URL` as a reference to your PostgreSQL service. If the bot logs show a hostname error for `postgres.railway.internal`, also set `DATABASE_PUBLIC_URL` from the PostgreSQL service and redeploy.
+
+`SEMI_AUTO_DEPOSIT_ENABLED=true` allows deposits at or below `SEMI_AUTO_DEPOSIT_MAX_AMOUNT` to be approved automatically after the user submits a unique transaction ID. This does not verify personal bKash/Nagad/Rocket payments through an official API; it blocks duplicate transaction IDs and sends admin notifications.
 
 ## Admin Usage
 

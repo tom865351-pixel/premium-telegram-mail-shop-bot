@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     support_username: str = Field(default="support", alias="SUPPORT_USERNAME")
     min_deposit: float = Field(default=1.0, alias="MIN_DEPOSIT")
     currency_symbol: str = Field(default="$", alias="CURRENCY_SYMBOL")
+    semi_auto_deposit_enabled: bool = Field(default=True, alias="SEMI_AUTO_DEPOSIT_ENABLED")
+    semi_auto_deposit_max_amount: float = Field(default=300, alias="SEMI_AUTO_DEPOSIT_MAX_AMOUNT")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

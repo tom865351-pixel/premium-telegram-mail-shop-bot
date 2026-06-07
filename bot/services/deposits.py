@@ -12,12 +12,34 @@ async def create_deposit(
     amount: float,
     method: str,
     transaction_id: str,
+    status: DepositStatus = DepositStatus.PENDING,
 ) -> Deposit:
-    deposit = Deposit(user_id=user_id, amount=amount, method=method, transaction_id=transaction_id)
+    deposit = Deposit(
+        user_id=user_id,
+        amount=amount,
+        method=method,
+        transaction_id=transaction_id.strip(),
+        status=status,
+    )
+    if status == DepositStatus.APPROVED:
+        deposit.reviewed_at = datetime.utcnow()
+        user = await session.get(User, user_id)
+        if user:
+            user.balance = float(user.balance) + float(amount)
     session.add(deposit)
     await session.commit()
     await session.refresh(deposit)
     return deposit
+
+
+async def txid_exists(session: AsyncSession, transaction_id: str) -> bool:
+    normalized = transaction_id.strip().lower()
+    if not normalized:
+        return False
+    existing = await session.scalar(
+        select(Deposit.id).where(func.lower(Deposit.transaction_id) == normalized).limit(1)
+    )
+    return existing is not None
 
 
 async def pending_deposits(session: AsyncSession, limit: int = 20) -> list[Deposit]:
