@@ -17,24 +17,40 @@ from bot.services.orders import order_count, purchase_product, purchase_product_
 from bot.services.products import list_active_products
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.utils.formatting import clean_support_username, money
+from bot.utils.ui import panel
 
 router = Router()
 
 RESERVED_REPLY_TEXTS = {
+    "MAIN MENU",
     "Main Menu",
+    "MAIL SHOP",
     "Shop",
+    "ADD BALANCE",
     "Deposit",
+    "MY PROFILE",
     "Profile",
+    "REFERRAL",
     "Referral",
+    "COUPON",
     "Coupon",
+    "MY ORDERS",
     "Orders",
+    "SUPPORT",
     "Support",
+    "ADMIN PANEL",
     "Admin Panel",
+    "PRODUCTS",
     "Products",
+    "ADD PRODUCT",
     "Add Product",
+    "ADD STOCK",
     "Add Stock",
+    "DEPOSITS",
     "Deposits",
+    "COUPONS",
     "Coupons",
+    "STATS",
     "Stats",
     "Binance",
     "USDT TRC20",
@@ -42,7 +58,9 @@ RESERVED_REPLY_TEXTS = {
     "bKash",
     "Nagad",
     "Rocket",
+    "BUY 1 ACCOUNT",
     "Single Buy",
+    "BULK BUY",
     "Bulk Buy",
 }
 
@@ -64,6 +82,23 @@ DEPOSIT_METHOD_LABELS = {
     "rocket": "Rocket",
 }
 
+MENU_ALIASES = {
+    "MAIN MENU": "Main Menu",
+    "MAIL SHOP": "Shop",
+    "ADD BALANCE": "Deposit",
+    "MY PROFILE": "Profile",
+    "MY ORDERS": "Orders",
+    "REFERRAL": "Referral",
+    "COUPON": "Coupon",
+    "SUPPORT": "Support",
+    "ADMIN PANEL": "Admin Panel",
+    "PRODUCTS": "Products",
+    "ADD PRODUCT": "Add Product",
+    "ADD STOCK": "Add Stock",
+    "DEPOSITS": "Deposits",
+    "COUPONS": "Coupons",
+    "STATS": "Stats",
+}
 ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats"}
 GLOBAL_MENU_TEXTS = {
     "Main Menu",
@@ -74,7 +109,16 @@ GLOBAL_MENU_TEXTS = {
     "Referral",
     "Coupon",
     "Support",
-    *ADMIN_MENU_TEXTS,
+    "Admin Panel",
+    "MAIN MENU",
+    "MAIL SHOP",
+    "ADD BALANCE",
+    "MY PROFILE",
+    "MY ORDERS",
+    "REFERRAL",
+    "COUPON",
+    "SUPPORT",
+    "ADMIN PANEL",
 }
 
 
@@ -141,10 +185,13 @@ async def send_menu(message: Message, session: AsyncSession, referral_code: str 
     settings = get_settings()
     user = await get_or_create_user(session, message.from_user, referral_code)
     text = (
-        "Premium Mail Shop\n\n"
-        f"Welcome, {user.first_name or 'Customer'}.\n"
-        f"Current Balance: {money(user.balance)}\n\n"
-        "Use the keyboard below to browse products, deposit funds, or manage your orders."
+        panel(
+            "PREMIUM MAIL SHOP",
+            f"Customer: {user.first_name or 'Customer'}",
+            f"Balance: {money(user.balance)}",
+            "",
+            "Select an option from the keyboard below.",
+        )
     )
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
 
@@ -159,17 +206,16 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
     await state.clear()
     settings = get_settings()
     user = await get_or_create_user(session, message.from_user)
+    selected = MENU_ALIASES.get(message.text, message.text)
 
-    if message.text == "Main Menu":
+    if selected == "Main Menu":
         await message.answer(
-            "Main Menu\n\n"
-            f"Balance: {money(user.balance)}\n"
-            "Select an option from the keyboard.",
+            panel("MAIN MENU", f"Balance: {money(user.balance)}", "", "Select an option from the keyboard."),
             reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
         )
         return
 
-    if message.text == "Shop":
+    if selected == "Shop":
         product_rows = await list_active_products(session)
         if not product_rows:
             await message.answer(
@@ -178,31 +224,33 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
             )
             return
         await message.answer(
-            "Product Catalog\n\nSelect a product from the keyboard below.",
+            panel("PRODUCT CATALOG", "Select a product from the keyboard below."),
             reply_markup=products_reply_menu(product_rows, message.from_user.id in settings.admin_ids),
         )
         return
 
-    if message.text == "Deposit":
+    if selected == "Deposit":
         await message.answer(
-            "Deposit Funds\n\nSelect your preferred payment method from the keyboard below.",
+            panel("ADD BALANCE", "Select your preferred payment method from the keyboard below."),
             reply_markup=deposit_methods_reply_menu(),
         )
         return
 
-    if message.text == "Profile":
+    if selected == "Profile":
         orders = await order_count(session, user.id)
         await message.answer(
-            "Account Profile\n\n"
-            f"Telegram ID: <code>{user.telegram_id}</code>\n"
-            f"Balance: {money(user.balance)}\n"
-            f"Total Orders: {orders}\n"
-            f"Referral Code: <code>{user.referral_code}</code>",
+            panel(
+                "MY PROFILE",
+                f"Telegram ID: <code>{user.telegram_id}</code>",
+                f"Balance: {money(user.balance)}",
+                f"Total Orders: {orders}",
+                f"Referral Code: <code>{user.referral_code}</code>",
+            ),
             reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
         )
         return
 
-    if message.text == "Orders":
+    if selected == "Orders":
         rows = await recent_orders(session, user.id)
         if not rows:
             text = "Order History\n\nNo orders found."
@@ -213,7 +261,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
         return
 
-    if message.text == "Referral":
+    if selected == "Referral":
         bot_username = (await message.bot.me()).username
         link = f"https://t.me/{bot_username}?start={user.referral_code}"
         await message.answer(
@@ -224,17 +272,17 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         )
         return
 
-    if message.text == "Coupon":
+    if selected == "Coupon":
         await state.set_state(CouponForm.code)
         await message.answer("Coupon Redemption\n\nSend your coupon code.")
         return
 
-    if message.text == "Support":
+    if selected == "Support":
         username = clean_support_username(settings.support_username)
         await message.answer(f"Support: @{username}", reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
         return
 
-    if message.text == "Admin Panel":
+    if selected == "Admin Panel":
         if message.from_user.id not in settings.admin_ids:
             await message.answer("You are not authorized.", reply_markup=main_reply_menu(False))
             return
@@ -244,14 +292,6 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         )
         return
 
-    if message.text in ADMIN_MENU_TEXTS:
-        if message.from_user.id not in settings.admin_ids:
-            await message.answer("You are not authorized.", reply_markup=main_reply_menu(False))
-            return
-        await message.answer(
-            "Admin Panel\n\nPrevious action was cancelled. Select an admin option again.",
-            reply_markup=admin_reply_menu(),
-        )
 
 
 @router.callback_query(F.data == "menu")
@@ -403,7 +443,7 @@ async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer("Delivered.")
 
 
-@router.message(StateFilter(None), F.text == "Single Buy")
+@router.message(StateFilter(None), F.text.in_({"Single Buy", "BUY 1 ACCOUNT"}))
 async def buy_product_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
     product_id = data.get("selected_product_id")
@@ -434,7 +474,7 @@ async def bulk_buy_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(StateFilter(None), F.text == "Bulk Buy")
+@router.message(StateFilter(None), F.text.in_({"Bulk Buy", "BULK BUY"}))
 async def bulk_buy_start_text(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     product_id = data.get("selected_product_id")
