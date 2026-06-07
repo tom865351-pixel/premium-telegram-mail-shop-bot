@@ -175,6 +175,18 @@ GLOBAL_MENU_TEXTS = {
     "⚙️ Admin Panel",
 }
 
+ADMIN_ACTION_PREFIXES = (
+    "Product #",
+    "Add Stock #",
+    "Enable Product #",
+    "Disable Product #",
+    "Delete Product #",
+    "Confirm Delete Product #",
+    "Cancel Product #",
+    "Approve Deposit #",
+    "Reject Deposit #",
+)
+
 
 class DepositForm(StatesGroup):
     amount = State()
@@ -273,6 +285,15 @@ def clean_button_text(text: str) -> str:
                 cleaned = cleaned[len(prefix) :].strip()
                 changed = True
     return cleaned
+
+
+def is_admin_action_text(text: str) -> bool:
+    cleaned = clean_button_text(text)
+    upper_cleaned = cleaned.upper()
+    return any(
+        cleaned.startswith(prefix) or upper_cleaned.startswith(prefix.upper())
+        for prefix in ADMIN_ACTION_PREFIXES
+    )
 
 
 def suspicious_txid_reason(txid: str) -> str | None:
@@ -858,6 +879,6 @@ async def balance(message: Message, session: AsyncSession) -> None:
     await message.answer(f"Balance: {money(user.balance)}")
 
 
-@router.message(StateFilter(None), F.text.func(lambda text: text not in RESERVED_REPLY_TEXTS))
+@router.message(StateFilter(None), F.text.func(lambda text: text not in RESERVED_REPLY_TEXTS and not is_admin_action_text(text)))
 async def product_name_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await send_product_detail_message(message, session, state, message.text)

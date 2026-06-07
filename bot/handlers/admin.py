@@ -1,4 +1,5 @@
 import csv
+import re
 from io import BytesIO, StringIO
 
 from aiogram import F, Router
@@ -46,12 +47,13 @@ def is_admin(user_id: int) -> bool:
 
 
 def _id_from_hash_button(text: str, prefix: str) -> int | None:
-    if not text.startswith(prefix):
+    normalized = re.sub(r"^[^\w#]+", "", text.strip()).strip()
+    if not normalized.startswith(prefix):
         return None
-    try:
-        return int(text.rsplit("#", 1)[1].strip())
-    except (IndexError, ValueError):
+    match = re.search(r"#\s*(\d+)", normalized)
+    if not match:
         return None
+    return int(match.group(1))
 
 
 def _method_label(method: str) -> str:
