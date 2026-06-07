@@ -2,7 +2,7 @@ import csv
 from io import BytesIO, StringIO
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -10,7 +10,14 @@ from openpyxl import load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
-from bot.keyboards.admin import admin_menu, admin_product_list, delete_product_confirm, deposit_review, product_admin_actions
+from bot.keyboards.admin import (
+    admin_menu,
+    admin_product_list,
+    admin_reply_menu,
+    delete_product_confirm,
+    deposit_review,
+    product_admin_actions,
+)
 from bot.keyboards.user import back_menu
 from bot.services.coupons import create_coupon
 from bot.services.deposits import pending_deposits, review_deposit
@@ -85,7 +92,8 @@ async def admin_command(message: Message) -> None:
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    await message.answer("Admin Panel", reply_markup=admin_menu())
+    await message.answer("Admin Panel", reply_markup=admin_reply_menu())
+    await message.answer("Admin quick actions:", reply_markup=admin_menu())
 
 
 @router.callback_query(F.data == "admin")
@@ -94,8 +102,19 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("Unauthorized.", show_alert=True)
         return
-    await callback.message.edit_text("Admin Panel", reply_markup=admin_menu())
+    await callback.message.answer("Admin Panel", reply_markup=admin_reply_menu())
+    await callback.message.edit_text("Admin quick actions:", reply_markup=admin_menu())
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text == "Admin Panel")
+async def admin_panel_text(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    await message.answer("Admin Panel", reply_markup=admin_reply_menu())
+    await message.answer("Admin quick actions:", reply_markup=admin_menu())
 
 
 @router.callback_query(F.data == "admin_stats")
@@ -117,6 +136,24 @@ async def stats(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == "Stats")
+async def stats_text(message: Message, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    data = await admin_stats(session)
+    await message.answer(
+        "Store Stats\n\n"
+        f"Users: {data['users']}\n"
+        f"Products: {data['products']}\n"
+        f"Unsold stock: {data['stock']}\n"
+        f"Orders: {data['orders']}\n"
+        f"Revenue: {money(data['revenue'])}\n"
+        f"Pending deposits: {data['pending_deposits']}",
+        reply_markup=admin_reply_menu(),
+    )
+
+
 @router.callback_query(F.data == "admin_products")
 async def admin_products(callback: CallbackQuery, session: AsyncSession) -> None:
     if not is_admin(callback.from_user.id):
@@ -132,6 +169,22 @@ async def admin_products(callback: CallbackQuery, session: AsyncSession) -> None
         )
         await callback.message.edit_text(text, reply_markup=admin_product_list(rows))
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text == "Products")
+async def admin_products_text(message: Message, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    rows = await list_all_products(session)
+    if not rows:
+        await message.answer("No products created.", reply_markup=admin_reply_menu())
+    else:
+        text = "Products\n\n" + "\n".join(
+            f"#{product.id} {product.name} - {money(product.price)} - stock {stock} - {'active' if product.is_active else 'disabled'}"
+            for product, stock in rows
+        )
+        await message.answer(text, reply_markup=admin_product_list(rows))
 
 
 @router.callback_query(F.data.startswith("admin_product:"))
@@ -158,6 +211,19 @@ async def admin_product_detail(callback: CallbackQuery, session: AsyncSession) -
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == "Add Product")
+async def add_product_start_text(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    await state.set_state(ProductForm.details)
+    await message.answer(
+        "Send product details in this format:\n\n"
+        "Name | Price | Description\n\n"
+        "Example:\nGmail Fresh | 120 | Fresh Gmail accounts"
+    )
+
+
 @router.callback_query(F.data == "admin_add_product")
 async def add_product_start(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
@@ -171,6 +237,22 @@ async def add_product_start(callback: CallbackQuery, state: FSMContext) -> None:
         reply_markup=back_menu(),
     )
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text == "Add Stock")
+async def add_stock_start_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    products = await list_all_products(session)
+    if not products:
+        await message.answer("Create a product before adding stock.", reply_markup=admin_reply_menu())
+    else:
+        await state.set_state(StockForm.product_id)
+        await message.answer(
+            "Send the product ID to stock.\n\n"
+            + "\n".join(f"#{product.id} {product.name}" for product, _ in products)
+        )
 
 
 @router.message(ProductForm.details)
@@ -208,6 +290,27 @@ async def add_stock_start(callback: CallbackQuery, state: FSMContext, session: A
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == "Deposits")
+async def deposits_text(message: Message, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    rows = await pending_deposits(session)
+    if not rows:
+        await message.answer("No pending deposits.", reply_markup=admin_reply_menu())
+    else:
+        first = rows[0]
+        await message.answer(
+            f"Pending deposit #{first.id}\n\n"
+            f"User ID: {first.user_id}\n"
+            f"Amount: {money(first.amount)}\n"
+            f"Method: {first.method}\n"
+            f"TXID: {first.transaction_id}\n\n"
+            f"Queue size: {len(rows)}",
+            reply_markup=deposit_review(first.id),
+        )
+
+
 @router.callback_query(F.data.startswith("admin_stock_for:"))
 async def add_stock_for_product(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
@@ -222,6 +325,19 @@ async def add_stock_for_product(callback: CallbackQuery, state: FSMContext) -> N
         reply_markup=back_menu(),
     )
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text == "Coupons")
+async def add_coupon_start_text(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    await state.set_state(CouponAdminForm.details)
+    await message.answer(
+        "Send coupon details:\n\n"
+        "CODE | Amount | Max Uses\n\n"
+        "Example:\nWELCOME10 | 100 | 100"
+    )
 
 
 @router.message(StockForm.product_id)

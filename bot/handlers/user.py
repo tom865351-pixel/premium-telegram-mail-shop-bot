@@ -1,7 +1,7 @@
 from io import BytesIO
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
@@ -9,7 +9,15 @@ from openpyxl import Workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
-from bot.keyboards.user import back_menu, deposit_methods, main_menu, product_buy_menu, products_menu
+from bot.keyboards.user import (
+    back_menu,
+    deposit_methods,
+    main_menu,
+    main_reply_menu,
+    product_buy_menu,
+    products_menu,
+    products_reply_menu,
+)
 from bot.services.coupons import redeem_coupon
 from bot.services.deposits import create_deposit
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders
@@ -18,6 +26,24 @@ from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.utils.formatting import clean_support_username, money
 
 router = Router()
+
+RESERVED_REPLY_TEXTS = {
+    "Main Menu",
+    "Shop Now",
+    "Deposit",
+    "Profile",
+    "Refer",
+    "Coupon",
+    "Orders",
+    "Support",
+    "Admin Panel",
+    "Products",
+    "Add Product",
+    "Add Stock",
+    "Deposits",
+    "Coupons",
+    "Stats",
+}
 
 
 class DepositForm(StatesGroup):
@@ -65,7 +91,8 @@ async def send_menu(message: Message, session: AsyncSession, referral_code: str 
         f"Balance: {money(user.balance)}\n"
         "Choose an option below."
     )
-    await message.answer(text, reply_markup=main_menu(message.from_user.id in settings.admin_ids))
+    await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+    await message.answer("Quick actions:", reply_markup=main_menu(message.from_user.id in settings.admin_ids))
 
 
 @router.message(Command("start"))
@@ -85,6 +112,17 @@ async def menu(callback: CallbackQuery, session: AsyncSession, state: FSMContext
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == "Main Menu")
+async def menu_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    settings = get_settings()
+    user = await get_or_create_user(session, message.from_user)
+    await message.answer(
+        f"Main Menu\n\nBalance: {money(user.balance)}",
+        reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+    )
+
+
 @router.callback_query(F.data == "dashboard")
 async def dashboard(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_or_create_user(session, callback.from_user)
@@ -100,14 +138,47 @@ async def dashboard(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == "Profile")
+async def dashboard_text(message: Message, session: AsyncSession) -> None:
+    user = await get_or_create_user(session, message.from_user)
+    orders = await order_count(session, user.id)
+    await message.answer(
+        "Dashboard\n\n"
+        f"User ID: {user.telegram_id}\n"
+        f"Balance: {money(user.balance)}\n"
+        f"Total orders: {orders}\n"
+        f"Referral code: {user.referral_code}",
+        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+    )
+
+
 @router.callback_query(F.data == "products")
 async def products(callback: CallbackQuery, session: AsyncSession) -> None:
     product_rows = await list_active_products(session)
     if not product_rows:
         await callback.message.edit_text("No products available right now.", reply_markup=back_menu())
     else:
-        await callback.message.edit_text("Choose a product.", reply_markup=products_menu(product_rows))
+        await callback.message.answer(
+            "Choose a product.",
+            reply_markup=products_reply_menu(product_rows, callback.from_user.id in get_settings().admin_ids),
+        )
+        await callback.message.edit_text("Products", reply_markup=products_menu(product_rows))
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text == "Shop Now")
+async def products_text(message: Message, session: AsyncSession) -> None:
+    product_rows = await list_active_products(session)
+    if not product_rows:
+        await message.answer(
+            "No products available right now.",
+            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        )
+        return
+    await message.answer(
+        "Choose a product.",
+        reply_markup=products_reply_menu(product_rows, message.from_user.id in get_settings().admin_ids),
+    )
 
 
 @router.callback_query(F.data.startswith("product:"))
@@ -128,6 +199,23 @@ async def product_detail(callback: CallbackQuery, session: AsyncSession) -> None
         reply_markup=product_buy_menu(product.id),
     )
     await callback.answer()
+
+
+async def send_product_detail_message(message: Message, session: AsyncSession, product_name: str) -> bool:
+    product_rows = await list_active_products(session)
+    product_row = next((row for row in product_rows if row[0].name.lower() == product_name.lower()), None)
+    if not product_row:
+        return False
+
+    product, stock_count = product_row
+    await message.answer(
+        f"{product.name}\n\n"
+        f"Price: {money(product.price)}\n"
+        f"File Stock: {stock_count}\n\n"
+        f"{product.description or 'Choose single buy or bulk buy.'}",
+        reply_markup=product_buy_menu(product.id),
+    )
+    return True
 
 
 @router.callback_query(F.data.startswith("buy_one:"))
@@ -194,10 +282,28 @@ async def orders(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == "Orders")
+async def orders_text(message: Message, session: AsyncSession) -> None:
+    user = await get_or_create_user(session, message.from_user)
+    rows = await recent_orders(session, user.id)
+    if not rows:
+        text = "No orders yet."
+    else:
+        text = "Recent Orders\n\n" + "\n".join(
+            f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
+        )
+    await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+
+
 @router.callback_query(F.data == "deposit")
 async def deposit(callback: CallbackQuery) -> None:
     await callback.message.edit_text("Choose a deposit method.", reply_markup=deposit_methods())
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text == "Deposit")
+async def deposit_text(message: Message) -> None:
+    await message.answer("Choose a deposit method.", reply_markup=deposit_methods())
 
 
 @router.callback_query(F.data.startswith("deposit_method:"))
@@ -267,6 +373,12 @@ async def coupon(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == "Coupon")
+async def coupon_text(message: Message, state: FSMContext) -> None:
+    await state.set_state(CouponForm.code)
+    await message.answer("Send your coupon code.")
+
+
 @router.message(CouponForm.code)
 async def coupon_code(message: Message, state: FSMContext, session: AsyncSession) -> None:
     user = await get_or_create_user(session, message.from_user)
@@ -289,11 +401,30 @@ async def referral(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == "Refer")
+async def referral_text(message: Message, session: AsyncSession) -> None:
+    user = await get_or_create_user(session, message.from_user)
+    bot_username = (await message.bot.me()).username
+    link = f"https://t.me/{bot_username}?start={user.referral_code}"
+    await message.answer(
+        "Referral Program\n\n"
+        f"Commission: {get_settings().referral_commission_percent}%\n"
+        f"Your link:\n{link}",
+        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+    )
+
+
 @router.callback_query(F.data == "support")
 async def support(callback: CallbackQuery) -> None:
     username = clean_support_username(get_settings().support_username)
     await callback.message.edit_text(f"Support: @{username}", reply_markup=back_menu())
     await callback.answer()
+
+
+@router.message(StateFilter(None), F.text == "Support")
+async def support_text(message: Message) -> None:
+    username = clean_support_username(get_settings().support_username)
+    await message.answer(f"Support: @{username}", reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
 
 
 @router.message(Command("balance"))
@@ -302,3 +433,8 @@ async def balance(message: Message, session: AsyncSession) -> None:
     if not user:
         user = await get_or_create_user(session, message.from_user)
     await message.answer(f"Balance: {money(user.balance)}")
+
+
+@router.message(StateFilter(None), F.text.func(lambda text: text not in RESERVED_REPLY_TEXTS))
+async def product_name_text(message: Message, session: AsyncSession) -> None:
+    await send_product_detail_message(message, session, message.text)

@@ -1,4 +1,4 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
@@ -22,6 +22,18 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def main_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text="Shop Now"), KeyboardButton(text="Deposit")],
+        [KeyboardButton(text="Profile"), KeyboardButton(text="Refer")],
+        [KeyboardButton(text="Coupon"), KeyboardButton(text="Orders")],
+        [KeyboardButton(text="Support")],
+    ]
+    if is_admin:
+        rows.append([KeyboardButton(text="Admin Panel")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder="Choose a menu")
+
+
 def back_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="menu")]])
 
@@ -39,6 +51,17 @@ def products_menu(products: list[tuple[object, int]]) -> InlineKeyboardMarkup:
         )
     rows.append([InlineKeyboardButton(text="Back", callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def products_reply_menu(products: list[tuple[object, int]], is_admin: bool = False) -> ReplyKeyboardMarkup:
+    rows = []
+    product_buttons = [KeyboardButton(text=product.name) for product, _ in products]
+    for index in range(0, len(product_buttons), 2):
+        rows.append(product_buttons[index : index + 2])
+    rows.append([KeyboardButton(text="Main Menu")])
+    if is_admin:
+        rows.append([KeyboardButton(text="Admin Panel")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder="Choose a product")
 
 
 def product_buy_menu(product_id: int) -> InlineKeyboardMarkup:

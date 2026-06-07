@@ -1,4 +1,4 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 
 def admin_menu() -> InlineKeyboardMarkup:
@@ -18,6 +18,19 @@ def admin_menu() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(text="Main Menu", callback_data="menu")],
         ]
+    )
+
+
+def admin_reply_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Products"), KeyboardButton(text="Add Product")],
+            [KeyboardButton(text="Add Stock"), KeyboardButton(text="Deposits")],
+            [KeyboardButton(text="Coupons"), KeyboardButton(text="Stats")],
+            [KeyboardButton(text="Main Menu")],
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Admin action",
     )
 
 
