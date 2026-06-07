@@ -1,3 +1,4 @@
+import re
 from io import BytesIO
 
 from aiogram import F, Router
@@ -288,7 +289,7 @@ def clean_button_text(text: str) -> str:
 
 
 def is_admin_action_text(text: str) -> bool:
-    cleaned = clean_button_text(text)
+    cleaned = re.sub(r"^[^A-Za-z0-9#]+", "", clean_button_text(text)).strip()
     upper_cleaned = cleaned.upper()
     return any(
         cleaned.startswith(prefix) or upper_cleaned.startswith(prefix.upper())
