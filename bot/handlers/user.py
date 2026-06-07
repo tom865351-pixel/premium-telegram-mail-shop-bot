@@ -71,6 +71,10 @@ RESERVED_REPLY_TEXTS = {
     "Stats",
     "👥 Members",
     "Members",
+    "📋 All Members",
+    "All Members",
+    "🔎 Search Member",
+    "Search Member",
     "🟡 Binance",
     "Binance",
     "💵 USDT TRC20",
@@ -180,6 +184,7 @@ GLOBAL_MENU_TEXTS = {
 
 ADMIN_ACTION_PREFIXES = (
     "Product #",
+    "Member #",
     "Add Stock #",
     "Edit Product #",
     "Add Balance #",

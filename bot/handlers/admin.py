@@ -17,13 +17,14 @@ from bot.keyboards.admin import (
     delete_product_confirm_reply_menu,
     deposit_review_reply_menu,
     member_actions_reply_menu,
+    members_reply_menu,
     product_admin_actions_reply_menu,
 )
 from bot.services.coupons import create_coupon
 from bot.services.deposits import pending_deposits, review_deposit
 from bot.services.products import add_stock, create_product, delete_product, list_all_products, toggle_product, update_product
 from bot.services.stats import admin_stats
-from bot.services.users import adjust_user_balance, find_user, set_user_banned, set_user_restricted
+from bot.services.users import adjust_user_balance, find_user, list_recent_users, set_user_banned, set_user_restricted
 from bot.utils.formatting import money
 
 router = Router()
@@ -120,6 +121,10 @@ def _is_member_action(text: str) -> bool:
             "Unrestrict Member #",
         ),
     )
+
+
+def _is_member_selection(text: str) -> bool:
+    return _starts_with_any(text, ("Member #",))
 
 
 def _member_status(user: object) -> str:
@@ -321,7 +326,7 @@ async def stats_text(message: Message, session: AsyncSession, state: FSMContext)
     )
 
 
-@router.message(StateFilter("*"), F.text.in_({"Members", "MEMBERS", "👥 Members"}))
+@router.message(StateFilter("*"), F.text.in_({"Members", "MEMBERS", "👥 Members", "Search Member", "🔎 Search Member"}))
 async def members_start_text(message: Message, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -334,6 +339,52 @@ async def members_start_text(message: Message, state: FSMContext) -> None:
         "Example:\n"
         "7562995992\n"
         "@username"
+    )
+
+
+@router.message(StateFilter("*"), F.text.in_({"All Members", "📋 All Members"}))
+async def all_members_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    users = await list_recent_users(session, limit=20)
+    if not users:
+        await message.answer("Members\n\nNo members found.", reply_markup=admin_reply_menu())
+        return
+    lines = []
+    for user in users:
+        username = f"@{user.username}" if user.username else "no_username"
+        lines.append(
+            f"#{user.id} | {user.first_name or 'Unknown'} | {username} | TG: {user.telegram_id} | {money(user.balance)} | {_member_status(user)}"
+        )
+    await message.answer(
+        "All Members\n\n"
+        + "\n".join(lines)
+        + "\n\nSelect a member from the keyboard below.",
+        reply_markup=members_reply_menu(users),
+    )
+
+
+@router.message(StateFilter("*"), F.text.func(_is_member_selection))
+async def member_select_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    user_id = _id_from_hash_button(message.text, "Member #")
+    if not user_id:
+        await message.answer("Invalid member selection.", reply_markup=admin_reply_menu())
+        return
+    from bot.database.models import User
+
+    user = await session.get(User, user_id)
+    if not user:
+        await message.answer("Member not found.", reply_markup=admin_reply_menu())
+        return
+    await message.answer(
+        _member_text(user),
+        reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
     )
 
 

@@ -42,6 +42,11 @@ async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> Us
     return await session.scalar(select(User).where(User.telegram_id == telegram_id))
 
 
+async def list_recent_users(session: AsyncSession, limit: int = 20) -> list[User]:
+    result = await session.execute(select(User).order_by(User.id.desc()).limit(limit))
+    return list(result.scalars().all())
+
+
 async def find_user(session: AsyncSession, query: str) -> User | None:
     clean = query.strip()
     if clean.startswith("@"):

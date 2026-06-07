@@ -1,6 +1,20 @@
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
+def members_reply_menu(users: list[object]) -> ReplyKeyboardMarkup:
+    rows = []
+    buttons = [KeyboardButton(text=f"👤 Member #{user.id}") for user in users]
+    for index in range(0, len(buttons), 2):
+        rows.append(buttons[index : index + 2])
+    rows.append([KeyboardButton(text="🔎 Search Member"), KeyboardButton(text="⚙️ Admin Panel")])
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Select member",
+    )
+
+
 def admin_reply_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -24,7 +38,8 @@ def member_actions_reply_menu(user_id: int, is_banned: bool, is_restricted: bool
             [KeyboardButton(text=f"💰 Add Balance #{user_id}"), KeyboardButton(text=f"➖ Remove Balance #{user_id}")],
             [KeyboardButton(text=f"🧾 Check Orders #{user_id}"), KeyboardButton(text=f"💳 Check Balance #{user_id}")],
             [KeyboardButton(text=f"🚫 {ban_label} Member #{user_id}"), KeyboardButton(text=f"🔒 {restrict_label} Member #{user_id}")],
-            [KeyboardButton(text="👥 Members"), KeyboardButton(text="⚙️ Admin Panel")],
+            [KeyboardButton(text="📋 All Members"), KeyboardButton(text="👥 Members")],
+            [KeyboardButton(text="⚙️ Admin Panel")],
         ],
         resize_keyboard=True,
         is_persistent=True,
