@@ -14,7 +14,7 @@ from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu
 from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
 from bot.services.coupons import redeem_coupon
 from bot.database.models import DepositStatus
-from bot.services.ai import ask_gemini
+from bot.services.ai import ask_gemini_agent
 from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, recent_deposits, txid_exists
 from bot.services.ocr import analyze_payment_screenshot
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
@@ -544,6 +544,114 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
     return False
 
 
+async def execute_ai_action(
+    message: Message,
+    session: AsyncSession,
+    state: FSMContext,
+    user: object,
+    action: str,
+    reply: str,
+) -> bool:
+    settings = get_settings()
+    is_admin = message.from_user.id in settings.admin_ids
+    action = action.lower().strip()
+
+    if action == "answer":
+        await message.answer(reply or "Bujhlam. Ar kichu bolen, ami help kortesi.", reply_markup=main_reply_menu(is_admin))
+        return True
+
+    if action == "menu":
+        await state.clear()
+        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(is_admin))
+        return True
+
+    if action == "shop":
+        await state.clear()
+        product_rows = await list_active_products(session)
+        if not product_rows:
+            await message.answer("No products are available right now.", reply_markup=main_reply_menu(is_admin))
+        else:
+            await message.answer(
+                reply or "Product list open kore dilam.",
+                reply_markup=products_reply_menu(product_rows, is_admin),
+            )
+        return True
+
+    if action == "deposit":
+        await state.clear()
+        await message.answer(
+            reply or "Deposit method select korun.",
+            reply_markup=deposit_methods_reply_menu(),
+        )
+        return True
+
+    if action == "profile":
+        await state.clear()
+        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(is_admin))
+        return True
+
+    if action == "orders":
+        await state.clear()
+        rows = await recent_orders(session, user.id)
+        if not rows:
+            text = "Order History\n\nNo orders found."
+        else:
+            text = "Recent Orders\n\n" + "\n".join(
+                f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
+            )
+        await message.answer(text, reply_markup=main_reply_menu(is_admin))
+        return True
+
+    if action == "deposit_status":
+        await state.clear()
+        rows = await recent_deposits(session, user.id)
+        if not rows:
+            text = "Deposit Status\n\nNo deposits found."
+        else:
+            text = "Deposit Status\n\n" + "\n".join(
+                f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - {deposit.status.value}"
+                for deposit in rows
+            )
+        await message.answer(text, reply_markup=main_reply_menu(is_admin))
+        return True
+
+    if action == "sell":
+        await state.set_state(SellForm.details)
+        await message.answer(
+            reply
+            or (
+                "Sell request korte details pathan:\n\n"
+                "Product type | Quantity | Expected price | Details"
+            )
+        )
+        return True
+
+    if action == "coupon":
+        await state.set_state(CouponForm.code)
+        await message.answer(reply or "Coupon code pathan.")
+        return True
+
+    if action == "referral":
+        await state.clear()
+        bot_username = (await message.bot.me()).username
+        link = f"https://t.me/{bot_username}?start={user.referral_code}"
+        await message.answer(
+            "Referral Program\n\n"
+            f"Commission: {settings.referral_commission_percent}%\n"
+            f"Your link:\n{link}",
+            reply_markup=main_reply_menu(is_admin),
+        )
+        return True
+
+    if action == "support":
+        await state.clear()
+        username = clean_support_username(settings.support_username)
+        await message.answer(reply or f"Support: @{username}", reply_markup=main_reply_menu(is_admin))
+        return True
+
+    return False
+
+
 async def send_menu(message: Message, session: AsyncSession, referral_code: str | None = None) -> None:
     settings = get_settings()
     user = await get_or_create_user(session, message.from_user, referral_code)
@@ -606,13 +714,14 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
     if selected == "AI":
         await state.set_state(AIHelpForm.message)
         await message.answer(
-            "AI Help\n\n"
-            "Write what you need.\n\n"
+            "AI Agent\n\n"
+            "Bangla, English, Banglish, typo sob chole. Apni normal vabe bolun ki korte chan.\n\n"
             "Examples:\n"
-            "- amar balance koto\n"
-            "- deposit korte chai\n"
-            "- gmail product dekhao\n"
-            "- order history dao\n\n"
+            "- amar blance koto\n"
+            "- diposit korta chai\n"
+            "- gmail ache naki\n"
+            "- order histry dao\n"
+            "- sell korte chai\n\n"
             "Send Main Menu to exit."
         )
         return
@@ -1240,21 +1349,34 @@ async def ai_help_message(message: Message, state: FSMContext, session: AsyncSes
         await message.answer("Please send a text message.")
         return
 
-    if await answer_ai_intent(message, session, state, user, text):
-        return
-
     product_rows = await list_active_products(session)
     products = ", ".join(
         f"{product.name} ({money(product.price)}, stock {stock})" for product, stock in product_rows[:12]
     ) or "No products available"
+    deposits = await recent_deposits(session, user.id, limit=3)
+    recent_deposit_summary = ", ".join(
+        f"#{deposit.id} {money(deposit.amount)} {deposit.status.value}" for deposit in deposits
+    ) or "No recent deposits"
     user_context = (
+        f"User name: {message.from_user.full_name}\n"
         f"User balance: {money(user.balance)}\n"
         f"Products: {products}\n"
-        f"Support username: @{clean_support_username(settings.support_username)}"
+        f"Recent deposits: {recent_deposit_summary}\n"
+        f"Support username: @{clean_support_username(settings.support_username)}\n"
+        "Available bot actions: menu, shop, deposit, profile, orders, deposit_status, sell, coupon, referral, support."
     )
-    await message.answer("AI is thinking...")
-    answer = await ask_gemini(text, user_context=user_context)
-    await message.answer(answer, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+    await message.answer("AI Agent is thinking...")
+    agent = await ask_gemini_agent(text, user_context=user_context)
+    handled = await execute_ai_action(
+        message,
+        session,
+        state,
+        user,
+        agent.get("action", "answer"),
+        agent.get("reply", ""),
+    )
+    if not handled and not await answer_ai_intent(message, session, state, user, text):
+        await message.answer(agent.get("reply") or "Bujhlam. Arektu details bolen.", reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
 
 
 @router.callback_query(F.data == "referral")

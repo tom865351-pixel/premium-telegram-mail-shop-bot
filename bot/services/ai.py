@@ -1,3 +1,6 @@
+import json
+import re
+
 import aiohttp
 
 from bot.config import get_settings
@@ -10,6 +13,35 @@ Help users with shop navigation, deposits, orders, coupons, referrals, support, 
 Do not claim you completed payments, refunds, balance changes, or admin actions.
 If the user asks for a sensitive admin action, tell them to use the Admin Panel.
 Keep answers practical and under 6 short lines.
+"""
+
+AGENT_PROMPT = """
+You are an AI agent inside a Telegram digital shop bot.
+Understand Bangla, English, Banglish, typo, broken spelling, and short casual messages.
+Decide what the user wants and return ONLY valid JSON.
+
+Allowed actions:
+- menu
+- shop
+- deposit
+- profile
+- orders
+- deposit_status
+- sell
+- coupon
+- referral
+- support
+- answer
+
+Rules:
+- Use an action when the user clearly wants a bot task, even with typo.
+- Use "answer" for general questions, confusion, advice, or when you need to explain.
+- Never approve payments, refund orders, add/remove balance, delete products, or claim admin actions are completed.
+- For risky/admin actions, choose "support" or "answer" and explain to use Admin Panel.
+- Reply in the user's language style. Prefer short Bangla/Banglish.
+
+JSON schema:
+{"action":"one_allowed_action","reply":"short helpful reply"}
 """
 
 
@@ -63,3 +95,95 @@ async def ask_gemini(user_text: str, user_context: str = "") -> str:
 
     text = "\n".join(part.get("text", "") for part in parts if isinstance(part, dict)).strip()
     return text or "AI did not return an answer. Please try again."
+
+
+def _extract_json(text: str) -> dict[str, str] | None:
+    cleaned = text.strip()
+    cleaned = re.sub(r"^```(?:json)?", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"```$", "", cleaned).strip()
+    match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+    if match:
+        cleaned = match.group(0)
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {
+        "action": str(data.get("action", "answer")).strip().lower(),
+        "reply": str(data.get("reply", "")).strip(),
+    }
+
+
+async def ask_gemini_agent(user_text: str, user_context: str = "") -> dict[str, str]:
+    settings = get_settings()
+    fallback = {
+        "action": "answer",
+        "reply": await ask_gemini(user_text, user_context=user_context),
+    }
+    if not settings.ai_enabled or settings.ai_provider.lower() != "gemini" or not settings.gemini_api_key:
+        return fallback
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{settings.gemini_model}:generateContent?key={settings.gemini_api_key}"
+    )
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": (
+                            f"{AGENT_PROMPT.strip()}\n\n"
+                            f"Shop context:\n{user_context.strip()}\n\n"
+                            f"User message:\n{user_text.strip()}"
+                        )
+                    }
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.15,
+            "maxOutputTokens": 220,
+        },
+    }
+
+    timeout = aiohttp.ClientTimeout(total=25)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(url, json=payload) as response:
+            data = await response.json(content_type=None)
+            if response.status >= 400:
+                error = data.get("error", {}) if isinstance(data, dict) else {}
+                message = error.get("message") or f"Gemini error {response.status}"
+                return {"action": "answer", "reply": f"AI error: {message}"}
+
+    try:
+        parts = data["candidates"][0]["content"]["parts"]
+        raw_text = "\n".join(part.get("text", "") for part in parts if isinstance(part, dict))
+    except (KeyError, IndexError, TypeError):
+        return {"action": "answer", "reply": "AI did not return a readable answer. Please try again."}
+
+    parsed = _extract_json(raw_text)
+    if parsed:
+        allowed = {
+            "menu",
+            "shop",
+            "deposit",
+            "profile",
+            "orders",
+            "deposit_status",
+            "sell",
+            "coupon",
+            "referral",
+            "support",
+            "answer",
+        }
+        if parsed["action"] not in allowed:
+            parsed["action"] = "answer"
+        if not parsed["reply"]:
+            parsed["reply"] = "Bujhlam. Ami help kortesi."
+        return parsed
+
+    return {"action": "answer", "reply": raw_text.strip() or fallback["reply"]}
