@@ -29,9 +29,14 @@ RESERVED_REPLY_TEXTS = {
     "MAIN MENU",
     "Main Menu",
     "🛍 Shop Now",
+    "🛍 Shop",
     "MAIL SHOP",
     "Shop",
+    "💼 Sell",
+    "Sell",
     "💳 Deposit",
+    "💳 Top Up",
+    "Top Up",
     "ADD BALANCE",
     "Deposit",
     "👤 Profile",
@@ -81,12 +86,16 @@ RESERVED_REPLY_TEXTS = {
     "📈 Reports",
     "Reports",
     "🧾 Deposit Status",
+    "🧾 Status",
+    "Status",
     "Deposit Status",
     "🟡 Binance",
     "Binance",
     "💵 USDT TRC20",
+    "TRC20",
     "USDT TRC20",
     "💵 USDT BEP20",
+    "BEP20",
     "USDT BEP20",
     "📱 bKash",
     "bKash",
@@ -95,9 +104,13 @@ RESERVED_REPLY_TEXTS = {
     "🚀 Rocket",
     "Rocket",
     "🛒 Single Buy",
+    "🛒 Single",
+    "Single",
     "BUY 1 ACCOUNT",
     "Single Buy",
     "📦 Bulk Buy",
+    "📦 Bulk",
+    "Bulk",
     "BULK BUY",
     "Bulk Buy",
 }
@@ -106,8 +119,10 @@ DEPOSIT_METHOD_TEXTS = {
     "🟡 Binance": "binance",
     "Binance": "binance",
     "💵 USDT TRC20": "usdt_trc20",
+    "TRC20": "usdt_trc20",
     "USDT TRC20": "usdt_trc20",
     "💵 USDT BEP20": "usdt_bep20",
+    "BEP20": "usdt_bep20",
     "USDT BEP20": "usdt_bep20",
     "📱 bKash": "bkash",
     "bKash": "bkash",
@@ -130,13 +145,22 @@ MENU_ALIASES = {
     "🏠 Main Menu": "Main Menu",
     "MAIN MENU": "Main Menu",
     "🛍 Shop Now": "Shop",
+    "🛍 Shop": "Shop",
     "MAIL SHOP": "Shop",
+    "💼 Sell": "Sell",
+    "SELL": "Sell",
     "💳 Deposit": "Deposit",
+    "💳 Top Up": "Deposit",
+    "TOP UP": "Deposit",
     "ADD BALANCE": "Deposit",
     "👤 Profile": "Profile",
     "MY PROFILE": "Profile",
     "📦 Orders": "Orders",
     "MY ORDERS": "Orders",
+    "🧾 Status": "Deposit Status",
+    "STATUS": "Deposit Status",
+    "🧾 Deposit Status": "Deposit Status",
+    "DEPOSIT STATUS": "Deposit Status",
     "🎁 Refer": "Referral",
     "REFERRAL": "Referral",
     "🏷 Coupon": "Coupon",
@@ -163,8 +187,10 @@ GLOBAL_MENU_TEXTS = {
     "Main Menu",
     "Shop",
     "Deposit",
+    "Sell",
     "Profile",
     "Orders",
+    "Deposit Status",
     "Referral",
     "Coupon",
     "Support",
@@ -180,9 +206,14 @@ GLOBAL_MENU_TEXTS = {
     "ADMIN PANEL",
     "🏠 Main Menu",
     "🛍 Shop Now",
+    "🛍 Shop",
+    "💼 Sell",
     "💳 Deposit",
+    "💳 Top Up",
     "👤 Profile",
     "📦 Orders",
+    "🧾 Status",
+    "🧾 Deposit Status",
     "🎁 Refer",
     "🏷 Coupon",
     "☎️ Support",
@@ -223,6 +254,10 @@ class DepositForm(StatesGroup):
 
 class CouponForm(StatesGroup):
     code = State()
+
+
+class SellForm(StatesGroup):
+    details = State()
 
 
 class BulkBuyForm(StatesGroup):
@@ -435,6 +470,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         return
     restricted_actions = {
         "Shop": "shop",
+        "Sell": "sell accounts",
         "Deposit": "deposit",
         "Coupon": "redeem coupons",
         "Referral": "use referral",
@@ -467,6 +503,17 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         )
         return
 
+    if selected == "Sell":
+        await state.set_state(SellForm.details)
+        await message.answer(
+            "Sell Request\n\n"
+            "Send what you want to sell in this format:\n\n"
+            "Product type | Quantity | Expected price | Details\n\n"
+            "Example:\n"
+            "Gmail fresh | 20 | 10 TK each | old stock, recovery attached"
+        )
+        return
+
     if selected == "Deposit":
         await message.answer(
             panel("ADD BALANCE", "Select your preferred payment method from the keyboard below."),
@@ -485,6 +532,18 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         else:
             text = "Recent Orders\n\n" + "\n".join(
                 f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
+            )
+        await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        return
+
+    if selected == "Deposit Status":
+        rows = await recent_deposits(session, user.id)
+        if not rows:
+            text = "Deposit Status\n\nNo deposits found."
+        else:
+            text = "Deposit Status\n\n" + "\n".join(
+                f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - {deposit.status.value}"
+                for deposit in rows
             )
         await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
         return
@@ -667,7 +726,7 @@ async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer("Delivered.")
 
 
-@router.message(StateFilter(None), F.text.in_({"Single Buy", "BUY 1 ACCOUNT", "🛒 Single Buy"}))
+@router.message(StateFilter(None), F.text.in_({"Single", "Single Buy", "BUY 1 ACCOUNT", "🛒 Single", "🛒 Single Buy"}))
 async def buy_product_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
     product_id = data.get("selected_product_id")
@@ -706,7 +765,7 @@ async def bulk_buy_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(StateFilter(None), F.text.in_({"Bulk Buy", "BULK BUY", "📦 Bulk Buy"}))
+@router.message(StateFilter(None), F.text.in_({"Bulk", "Bulk Buy", "BULK BUY", "📦 Bulk", "📦 Bulk Buy"}))
 async def bulk_buy_start_text(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     product_id = data.get("selected_product_id")
@@ -780,7 +839,7 @@ async def orders_text(message: Message, session: AsyncSession) -> None:
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
 
 
-@router.message(StateFilter("*"), F.text.in_({"Deposit Status", "🧾 Deposit Status"}))
+@router.message(StateFilter("*"), F.text.in_({"Status", "🧾 Status", "Deposit Status", "🧾 Deposit Status"}))
 async def deposit_status_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     user = await get_or_create_user(session, message.from_user)
@@ -1002,6 +1061,55 @@ async def coupon_code(message: Message, state: FSMContext, session: AsyncSession
     ok, text = await redeem_coupon(session, user, message.text)
     await state.clear()
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+
+
+@router.message(SellForm.details)
+async def sell_request_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    settings = get_settings()
+    user = await get_or_create_user(session, message.from_user)
+    block_text = account_block_text(user, "sell accounts")
+    if block_text:
+        await state.clear()
+        await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        return
+
+    details = message.text.strip()
+    if len(details) < 10:
+        await message.answer(
+            "Please send a little more detail.\n\n"
+            "Format: Product type | Quantity | Expected price | Details"
+        )
+        return
+
+    await state.clear()
+    seller_username = f"@{message.from_user.username}" if message.from_user.username else "not_available"
+    admin_text = (
+        "New Sell Request\n\n"
+        f"Seller: {message.from_user.full_name}\n"
+        f"Username: {seller_username}\n"
+        f"Telegram ID: <code>{message.from_user.id}</code>\n"
+        f"Balance: {money(user.balance)}\n\n"
+        "Offer Details:\n"
+        f"{details}"
+    )
+    sent = 0
+    for admin_id in settings.admin_ids:
+        try:
+            await message.bot.send_message(admin_id, admin_text)
+            sent += 1
+        except Exception:
+            pass
+
+    if sent:
+        await message.answer(
+            "Sell request submitted.\n\nAdmin will review your offer and contact you.",
+            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+        )
+    else:
+        await message.answer(
+            "Sell request saved, but admin notification could not be sent. Please contact support.",
+            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+        )
 
 
 @router.callback_query(F.data == "referral")

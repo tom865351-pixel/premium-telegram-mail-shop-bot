@@ -3,11 +3,9 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 def main_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton(text="🛍 Shop Now"), KeyboardButton(text="💳 Deposit")],
-        [KeyboardButton(text="👤 Profile"), KeyboardButton(text="📦 Orders")],
-        [KeyboardButton(text="🧾 Deposit Status")],
-        [KeyboardButton(text="🎁 Refer"), KeyboardButton(text="🏷 Coupon")],
-        [KeyboardButton(text="☎️ Support")],
+        [KeyboardButton(text="🛍 Shop"), KeyboardButton(text="💼 Sell"), KeyboardButton(text="💳 Top Up")],
+        [KeyboardButton(text="👤 Profile"), KeyboardButton(text="📦 Orders"), KeyboardButton(text="🏷 Coupon")],
+        [KeyboardButton(text="🎁 Refer"), KeyboardButton(text="🧾 Status"), KeyboardButton(text="☎️ Support")],
     ]
     if is_admin:
         rows.append([KeyboardButton(text="⚙️ Admin Panel")])
@@ -37,8 +35,7 @@ def products_reply_menu(products: list[tuple[object, int]], is_admin: bool = Fal
 
 def product_buy_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton(text="🛒 Single Buy"), KeyboardButton(text="📦 Bulk Buy")],
-        [KeyboardButton(text="🛍 Shop Now"), KeyboardButton(text="🏠 Main Menu")],
+        [KeyboardButton(text="🛒 Single"), KeyboardButton(text="📦 Bulk"), KeyboardButton(text="🏠 Main Menu")],
     ]
     if is_admin:
         rows.append([KeyboardButton(text="⚙️ Admin Panel")])
@@ -53,9 +50,8 @@ def product_buy_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
 def deposit_methods_reply_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🟡 Binance"), KeyboardButton(text="💵 USDT TRC20")],
-            [KeyboardButton(text="💵 USDT BEP20"), KeyboardButton(text="📱 bKash")],
-            [KeyboardButton(text="📱 Nagad"), KeyboardButton(text="🚀 Rocket")],
+            [KeyboardButton(text="🟡 Binance"), KeyboardButton(text="TRC20"), KeyboardButton(text="BEP20")],
+            [KeyboardButton(text="bKash"), KeyboardButton(text="Nagad"), KeyboardButton(text="Rocket")],
             [KeyboardButton(text="🏠 Main Menu")],
         ],
         resize_keyboard=True,
