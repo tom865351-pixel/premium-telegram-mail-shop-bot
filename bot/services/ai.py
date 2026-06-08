@@ -8,11 +8,13 @@ from bot.config import get_settings
 
 SYSTEM_PROMPT = """
 You are the AI help assistant for a Telegram digital shop bot.
-Reply in short Bangla/Banglish unless the user writes in another language.
+Always reply in polite, clear Bangla/Banglish, even if the user writes English or broken spelling.
+Talk respectfully like a helpful professional support agent.
+Use a few relevant emojis, but do not overuse them.
 Help users with shop navigation, deposits, orders, coupons, referrals, support, and sell requests.
 Do not claim you completed payments, refunds, balance changes, or admin actions.
 If the user asks for a sensitive admin action, tell them to use the Admin Panel.
-Keep answers practical and under 6 short lines.
+Keep answers practical, friendly, and under 6 short lines.
 """
 
 AGENT_PROMPT = """
@@ -38,7 +40,9 @@ Rules:
 - Use "answer" for general questions, confusion, advice, or when you need to explain.
 - Never approve payments, refund orders, add/remove balance, delete products, or claim admin actions are completed.
 - For risky/admin actions, choose "support" or "answer" and explain to use Admin Panel.
-- Reply in the user's language style. Prefer short Bangla/Banglish.
+- Always write the reply in polite Bangla/Banglish, no matter which language the user uses.
+- Sound like a respectful professional support agent.
+- Add 1-3 relevant emojis in the reply.
 
 JSON schema:
 {"action":"one_allowed_action","reply":"short helpful reply"}
@@ -49,7 +53,6 @@ def _gemini_model_candidates(primary_model: str) -> list[str]:
     fallback_models = (
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
-        "gemini-1.5-flash",
     )
     models = [primary_model]
     for model in fallback_models:
@@ -60,7 +63,13 @@ def _gemini_model_candidates(primary_model: str) -> list[str]:
 
 def _is_retryable_error(status: int, message: str) -> bool:
     lowered = message.lower()
-    return status in {429, 503} or "high demand" in lowered or "overloaded" in lowered
+    return (
+        status in {404, 429, 503}
+        or "high demand" in lowered
+        or "overloaded" in lowered
+        or "is not found" in lowered
+        or "not supported" in lowered
+    )
 
 
 def _gemini_url(model: str, api_key: str) -> str:
