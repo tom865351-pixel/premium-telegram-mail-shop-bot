@@ -551,12 +551,15 @@ async def execute_ai_action(
     user: object,
     action: str,
     reply: str,
+    keep_ai_chat: bool = False,
 ) -> bool:
     settings = get_settings()
     is_admin = message.from_user.id in settings.admin_ids
     action = action.lower().strip()
 
     if action == "answer":
+        if keep_ai_chat:
+            await state.set_state(AIHelpForm.message)
         await message.answer(reply or "Bujhlam. Ar kichu bolen, ami help kortesi.", reply_markup=main_reply_menu(is_admin))
         return True
 
@@ -586,12 +589,18 @@ async def execute_ai_action(
         return True
 
     if action == "profile":
-        await state.clear()
+        if keep_ai_chat:
+            await state.set_state(AIHelpForm.message)
+        else:
+            await state.clear()
         await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(is_admin))
         return True
 
     if action == "orders":
-        await state.clear()
+        if keep_ai_chat:
+            await state.set_state(AIHelpForm.message)
+        else:
+            await state.clear()
         rows = await recent_orders(session, user.id)
         if not rows:
             text = "Order History\n\nNo orders found."
@@ -603,7 +612,10 @@ async def execute_ai_action(
         return True
 
     if action == "deposit_status":
-        await state.clear()
+        if keep_ai_chat:
+            await state.set_state(AIHelpForm.message)
+        else:
+            await state.clear()
         rows = await recent_deposits(session, user.id)
         if not rows:
             text = "Deposit Status\n\nNo deposits found."
@@ -632,7 +644,10 @@ async def execute_ai_action(
         return True
 
     if action == "referral":
-        await state.clear()
+        if keep_ai_chat:
+            await state.set_state(AIHelpForm.message)
+        else:
+            await state.clear()
         bot_username = (await message.bot.me()).username
         link = f"https://t.me/{bot_username}?start={user.referral_code}"
         await message.answer(
@@ -644,7 +659,10 @@ async def execute_ai_action(
         return True
 
     if action == "support":
-        await state.clear()
+        if keep_ai_chat:
+            await state.set_state(AIHelpForm.message)
+        else:
+            await state.clear()
         username = clean_support_username(settings.support_username)
         await message.answer(reply or f"Support: @{username}", reply_markup=main_reply_menu(is_admin))
         return True
@@ -1374,6 +1392,7 @@ async def ai_help_message(message: Message, state: FSMContext, session: AsyncSes
         user,
         agent.get("action", "answer"),
         agent.get("reply", ""),
+        keep_ai_chat=True,
     )
     if not handled and not await answer_ai_intent(message, session, state, user, text):
         await message.answer(agent.get("reply") or "Bujhlam. Arektu details bolen.", reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
@@ -1430,4 +1449,37 @@ async def balance(message: Message, session: AsyncSession) -> None:
 
 @router.message(StateFilter(None), F.text.func(lambda text: text not in RESERVED_REPLY_TEXTS and not is_admin_action_text(text)))
 async def product_name_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
-    await send_product_detail_message(message, session, state, message.text)
+    if await send_product_detail_message(message, session, state, message.text):
+        return
+
+    settings = get_settings()
+    if not settings.ai_enabled:
+        return
+
+    user = await get_or_create_user(session, message.from_user)
+    text = (message.text or "").strip()
+    if not text:
+        return
+
+    product_rows = await list_active_products(session)
+    products = ", ".join(
+        f"{product.name} ({money(product.price)}, stock {stock})" for product, stock in product_rows[:12]
+    ) or "No products available"
+    user_context = (
+        f"User name: {message.from_user.full_name}\n"
+        f"User balance: {money(user.balance)}\n"
+        f"Products: {products}\n"
+        f"Support username: @{clean_support_username(settings.support_username)}\n"
+        "The user sent a normal chat message outside AI mode. Be helpful and offer the right bot action."
+    )
+    await message.answer("AI Agent is thinking...")
+    agent = await ask_gemini_agent(text, user_context=user_context)
+    await execute_ai_action(
+        message,
+        session,
+        state,
+        user,
+        agent.get("action", "answer"),
+        agent.get("reply", ""),
+        keep_ai_chat=True,
+    )
