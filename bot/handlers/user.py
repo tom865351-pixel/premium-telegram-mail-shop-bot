@@ -457,6 +457,13 @@ async def profile_text(session: AsyncSession, user: object) -> str:
     )
 
 
+def ai_reply_text(text: str) -> str:
+    clean = text.strip() if text else "Bujhlam. Ar kichu bolen, ami help kortesi."
+    if clean.startswith("🤖"):
+        return clean
+    return f"🤖 AI Agent\n\n{clean}"
+
+
 async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMContext, user: object, text: str) -> bool:
     lowered = text.lower()
     is_admin = message.from_user.id in get_settings().admin_ids
@@ -560,7 +567,7 @@ async def execute_ai_action(
     if action == "answer":
         if keep_ai_chat:
             await state.set_state(AIHelpForm.message)
-        await message.answer(reply or "Bujhlam. Ar kichu bolen, ami help kortesi.", reply_markup=main_reply_menu(is_admin))
+        await message.answer(ai_reply_text(reply), reply_markup=main_reply_menu(is_admin))
         return True
 
     if action == "menu":
@@ -575,7 +582,7 @@ async def execute_ai_action(
             await message.answer("No products are available right now.", reply_markup=main_reply_menu(is_admin))
         else:
             await message.answer(
-                reply or "Product list open kore dilam.",
+                ai_reply_text(reply or "Product list open kore dilam."),
                 reply_markup=products_reply_menu(product_rows, is_admin),
             )
         return True
@@ -583,7 +590,7 @@ async def execute_ai_action(
     if action == "deposit":
         await state.clear()
         await message.answer(
-            reply or "Deposit method select korun.",
+            ai_reply_text(reply or "Deposit method select korun."),
             reply_markup=deposit_methods_reply_menu(),
         )
         return True
@@ -630,17 +637,19 @@ async def execute_ai_action(
     if action == "sell":
         await state.set_state(SellForm.details)
         await message.answer(
-            reply
+            ai_reply_text(
+                reply
             or (
                 "Sell request korte details pathan:\n\n"
                 "Product type | Quantity | Expected price | Details"
+            )
             )
         )
         return True
 
     if action == "coupon":
         await state.set_state(CouponForm.code)
-        await message.answer(reply or "Coupon code pathan.")
+        await message.answer(ai_reply_text(reply or "Coupon code pathan."))
         return True
 
     if action == "referral":
@@ -664,7 +673,7 @@ async def execute_ai_action(
         else:
             await state.clear()
         username = clean_support_username(settings.support_username)
-        await message.answer(reply or f"Support: @{username}", reply_markup=main_reply_menu(is_admin))
+        await message.answer(ai_reply_text(reply or f"Support: @{username}"), reply_markup=main_reply_menu(is_admin))
         return True
 
     return False
@@ -732,7 +741,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
     if selected == "AI":
         await state.set_state(AIHelpForm.message)
         await message.answer(
-            "AI Agent\n\n"
+            "🤖 AI Agent\n\n"
             "Bangla, English, Banglish, typo sob chole. Apni normal vabe bolun ki korte chan.\n\n"
             "Examples:\n"
             "- amar blance koto\n"
@@ -1383,7 +1392,7 @@ async def ai_help_message(message: Message, state: FSMContext, session: AsyncSes
         f"Support username: @{clean_support_username(settings.support_username)}\n"
         "Available bot actions: menu, shop, deposit, profile, orders, deposit_status, sell, coupon, referral, support."
     )
-    await message.answer("AI Agent is thinking...")
+    await message.answer("🤖 AI Agent is thinking...")
     agent = await ask_gemini_agent(text, user_context=user_context)
     handled = await execute_ai_action(
         message,
@@ -1395,7 +1404,7 @@ async def ai_help_message(message: Message, state: FSMContext, session: AsyncSes
         keep_ai_chat=True,
     )
     if not handled and not await answer_ai_intent(message, session, state, user, text):
-        await message.answer(agent.get("reply") or "Bujhlam. Arektu details bolen.", reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        await message.answer(ai_reply_text(agent.get("reply") or "Bujhlam. Arektu details bolen."), reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
 
 
 @router.callback_query(F.data == "referral")
@@ -1472,7 +1481,7 @@ async def product_name_text(message: Message, session: AsyncSession, state: FSMC
         f"Support username: @{clean_support_username(settings.support_username)}\n"
         "The user sent a normal chat message outside AI mode. Be helpful and offer the right bot action."
     )
-    await message.answer("AI Agent is thinking...")
+    await message.answer("🤖 AI Agent is thinking...")
     agent = await ask_gemini_agent(text, user_context=user_context)
     await execute_ai_action(
         message,
