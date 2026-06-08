@@ -4,8 +4,9 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 def main_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="🛍 Shop"), KeyboardButton(text="💼 Sell"), KeyboardButton(text="💳 Top Up")],
-        [KeyboardButton(text="👤 Profile"), KeyboardButton(text="📦 Orders"), KeyboardButton(text="🏷 Coupon")],
-        [KeyboardButton(text="🎁 Refer"), KeyboardButton(text="🧾 Status"), KeyboardButton(text="☎️ Support")],
+        [KeyboardButton(text="🤖 AI"), KeyboardButton(text="👤 Profile"), KeyboardButton(text="📦 Orders")],
+        [KeyboardButton(text="🏷 Coupon"), KeyboardButton(text="🎁 Refer"), KeyboardButton(text="🧾 Status")],
+        [KeyboardButton(text="☎️ Support")],
     ]
     if is_admin:
         rows.append([KeyboardButton(text="⚙️ Admin Panel")])

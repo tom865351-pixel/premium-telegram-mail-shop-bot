@@ -14,6 +14,7 @@ from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu
 from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
 from bot.services.coupons import redeem_coupon
 from bot.database.models import DepositStatus
+from bot.services.ai import ask_gemini
 from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, recent_deposits, txid_exists
 from bot.services.ocr import analyze_payment_screenshot
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
@@ -34,6 +35,9 @@ RESERVED_REPLY_TEXTS = {
     "Shop",
     "💼 Sell",
     "Sell",
+    "🤖 AI",
+    "AI",
+    "AI Help",
     "💳 Deposit",
     "💳 Top Up",
     "Top Up",
@@ -149,6 +153,9 @@ MENU_ALIASES = {
     "MAIL SHOP": "Shop",
     "💼 Sell": "Sell",
     "SELL": "Sell",
+    "🤖 AI": "AI",
+    "AI": "AI",
+    "AI HELP": "AI",
     "💳 Deposit": "Deposit",
     "💳 Top Up": "Deposit",
     "TOP UP": "Deposit",
@@ -188,6 +195,7 @@ GLOBAL_MENU_TEXTS = {
     "Shop",
     "Deposit",
     "Sell",
+    "AI",
     "Profile",
     "Orders",
     "Deposit Status",
@@ -208,6 +216,7 @@ GLOBAL_MENU_TEXTS = {
     "🛍 Shop Now",
     "🛍 Shop",
     "💼 Sell",
+    "🤖 AI",
     "💳 Deposit",
     "💳 Top Up",
     "👤 Profile",
@@ -258,6 +267,10 @@ class CouponForm(StatesGroup):
 
 class SellForm(StatesGroup):
     details = State()
+
+
+class AIHelpForm(StatesGroup):
+    message = State()
 
 
 class BulkBuyForm(StatesGroup):
@@ -444,6 +457,93 @@ async def profile_text(session: AsyncSession, user: object) -> str:
     )
 
 
+async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMContext, user: object, text: str) -> bool:
+    lowered = text.lower()
+    is_admin = message.from_user.id in get_settings().admin_ids
+
+    if any(word in lowered for word in ("menu", "main", "home", "start", "মেনু")):
+        await state.clear()
+        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(is_admin))
+        return True
+
+    if any(word in lowered for word in ("shop", "product", "buy", "gmail", "mail", "stock", "দাম", "কিন")):
+        product_rows = await list_active_products(session)
+        if not product_rows:
+            await message.answer("No products are available right now.", reply_markup=main_reply_menu(is_admin))
+        else:
+            await message.answer(
+                panel("PRODUCT CATALOG", "Select a product from the keyboard below."),
+                reply_markup=products_reply_menu(product_rows, is_admin),
+            )
+        return True
+
+    if any(word in lowered for word in ("deposit", "top up", "payment", "add balance", "bkash", "nagad", "recharge", "টাকা")):
+        await message.answer(
+            panel("ADD BALANCE", "Select your preferred payment method from the keyboard below."),
+            reply_markup=deposit_methods_reply_menu(),
+        )
+        return True
+
+    if any(word in lowered for word in ("balance", "profile", "account", "amar taka", "ব্যালেন্স")):
+        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(is_admin))
+        return True
+
+    if any(word in lowered for word in ("order", "history", "purchase", "invoice", "অর্ডার")):
+        rows = await recent_orders(session, user.id)
+        if not rows:
+            response = "Order History\n\nNo orders found."
+        else:
+            response = "Recent Orders\n\n" + "\n".join(
+                f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
+            )
+        await message.answer(response, reply_markup=main_reply_menu(is_admin))
+        return True
+
+    if any(word in lowered for word in ("status", "deposit status", "pending", "approved")):
+        rows = await recent_deposits(session, user.id)
+        if not rows:
+            response = "Deposit Status\n\nNo deposits found."
+        else:
+            response = "Deposit Status\n\n" + "\n".join(
+                f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - {deposit.status.value}"
+                for deposit in rows
+            )
+        await message.answer(response, reply_markup=main_reply_menu(is_admin))
+        return True
+
+    if any(word in lowered for word in ("sell", "sale", "offer", "বিক্রি")):
+        await state.set_state(SellForm.details)
+        await message.answer(
+            "Sell Request\n\n"
+            "Send what you want to sell in this format:\n\n"
+            "Product type | Quantity | Expected price | Details"
+        )
+        return True
+
+    if any(word in lowered for word in ("coupon", "code", "discount")):
+        await state.set_state(CouponForm.code)
+        await message.answer("Coupon Redemption\n\nSend your coupon code.")
+        return True
+
+    if any(word in lowered for word in ("refer", "referral", "commission")):
+        bot_username = (await message.bot.me()).username
+        link = f"https://t.me/{bot_username}?start={user.referral_code}"
+        await message.answer(
+            "Referral Program\n\n"
+            f"Commission: {get_settings().referral_commission_percent}%\n"
+            f"Your link:\n{link}",
+            reply_markup=main_reply_menu(is_admin),
+        )
+        return True
+
+    if any(word in lowered for word in ("support", "help", "admin", "contact", "সাপোর্ট")):
+        username = clean_support_username(get_settings().support_username)
+        await message.answer(f"Support: @{username}", reply_markup=main_reply_menu(is_admin))
+        return True
+
+    return False
+
+
 async def send_menu(message: Message, session: AsyncSession, referral_code: str | None = None) -> None:
     settings = get_settings()
     user = await get_or_create_user(session, message.from_user, referral_code)
@@ -500,6 +600,20 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         await message.answer(
             panel("PRODUCT CATALOG", "Select a product from the keyboard below."),
             reply_markup=products_reply_menu(product_rows, message.from_user.id in settings.admin_ids),
+        )
+        return
+
+    if selected == "AI":
+        await state.set_state(AIHelpForm.message)
+        await message.answer(
+            "AI Help\n\n"
+            "Write what you need.\n\n"
+            "Examples:\n"
+            "- amar balance koto\n"
+            "- deposit korte chai\n"
+            "- gmail product dekhao\n"
+            "- order history dao\n\n"
+            "Send Main Menu to exit."
         )
         return
 
@@ -1110,6 +1224,37 @@ async def sell_request_finish(message: Message, state: FSMContext, session: Asyn
             "Sell request saved, but admin notification could not be sent. Please contact support.",
             reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
         )
+
+
+@router.message(AIHelpForm.message)
+async def ai_help_message(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    settings = get_settings()
+    user = await get_or_create_user(session, message.from_user)
+    if user.is_banned and message.from_user.id not in settings.admin_ids:
+        await state.clear()
+        await message.answer("Your account is banned. Please contact support.")
+        return
+
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Please send a text message.")
+        return
+
+    if await answer_ai_intent(message, session, state, user, text):
+        return
+
+    product_rows = await list_active_products(session)
+    products = ", ".join(
+        f"{product.name} ({money(product.price)}, stock {stock})" for product, stock in product_rows[:12]
+    ) or "No products available"
+    user_context = (
+        f"User balance: {money(user.balance)}\n"
+        f"Products: {products}\n"
+        f"Support username: @{clean_support_username(settings.support_username)}"
+    )
+    await message.answer("AI is thinking...")
+    answer = await ask_gemini(text, user_context=user_context)
+    await message.answer(answer, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
 
 
 @router.callback_query(F.data == "referral")

@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     ocr_space_api_key: str = Field(default="helloworld", alias="OCR_SPACE_API_KEY")
     ocr_space_api_url: str = Field(default="https://api.ocr.space/parse/image", alias="OCR_SPACE_API_URL")
     low_stock_alert_threshold: int = Field(default=5, alias="LOW_STOCK_ALERT_THRESHOLD")
+    ai_enabled: bool = Field(default=False, alias="AI_ENABLED")
+    ai_provider: str = Field(default="gemini", alias="AI_PROVIDER")
+    gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
