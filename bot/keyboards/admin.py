@@ -22,12 +22,40 @@ def admin_reply_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📥 Add Stock"), KeyboardButton(text="💳 Deposits")],
             [KeyboardButton(text="👥 Members"), KeyboardButton(text="📋 All Members")],
             [KeyboardButton(text="📣 Broadcast"), KeyboardButton(text="📈 Reports")],
+            [KeyboardButton(text="🔎 Admin Search"), KeyboardButton(text="📤 Export Data")],
             [KeyboardButton(text="🏷 Coupons"), KeyboardButton(text="📊 Stats")],
             [KeyboardButton(text="🏠 Main Menu")],
         ],
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Select admin action",
+    )
+
+
+def paged_reply_menu(prefix: str, page: int) -> ReplyKeyboardMarkup:
+    prev_page = max(page - 1, 1)
+    next_page = page + 1
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=f"⬅️ {prefix} Page {prev_page}"), KeyboardButton(text=f"➡️ {prefix} Page {next_page}")],
+            [KeyboardButton(text="⚙️ Admin Panel")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Navigate pages",
+    )
+
+
+def export_reply_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📤 Export Users"), KeyboardButton(text="📤 Export Orders")],
+            [KeyboardButton(text="📤 Export Deposits"), KeyboardButton(text="📤 Export Products")],
+            [KeyboardButton(text="⚙️ Admin Panel")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Select export",
     )
 
 
@@ -99,6 +127,7 @@ def product_admin_actions_reply_menu(product_id: int, is_active: bool) -> ReplyK
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=f"📥 Add Stock #{product_id}"), KeyboardButton(text=f"🔄 {label} Product #{product_id}")],
+            [KeyboardButton(text=f"📤 Export Stock #{product_id}")],
             [KeyboardButton(text=f"✏️ Edit Product #{product_id}"), KeyboardButton(text=f"🗑 Delete Product #{product_id}")],
             [KeyboardButton(text="📦 Products"), KeyboardButton(text="⚙️ Admin Panel")],
         ],

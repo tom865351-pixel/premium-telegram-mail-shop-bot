@@ -6,8 +6,8 @@ from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
-from openpyxl import load_workbook
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from openpyxl import Workbook, load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
@@ -16,18 +16,20 @@ from bot.keyboards.admin import (
     admin_products_reply_menu,
     delete_product_confirm_reply_menu,
     deposit_review_reply_menu,
+    export_reply_menu,
     member_actions_reply_menu,
     member_orders_reply_menu,
     members_reply_menu,
+    paged_reply_menu,
     product_admin_actions_reply_menu,
     refund_confirm_reply_menu,
 )
 from bot.services.coupons import create_coupon
 from bot.services.audit import log_admin_action
-from bot.services.deposits import deposited_today, pending_deposits, review_deposit
-from bot.services.products import add_stock, create_product, delete_product, list_all_products, toggle_product, update_product
+from bot.services.deposits import all_deposits, deposited_today, pending_deposits, review_deposit
+from bot.services.products import add_stock, create_product, delete_product, list_all_products, search_products, toggle_product, unsold_stock_items, update_product
 from bot.services.stats import admin_stats
-from bot.services.orders import order_count, refund_order, sales_report, total_spent
+from bot.services.orders import all_orders, get_order, order_count, refund_order, sales_report, total_spent
 from bot.services.users import adjust_user_balance, find_user, list_all_users, list_recent_users, set_user_banned, set_user_note, set_user_restricted
 from bot.utils.formatting import money
 
@@ -69,7 +71,24 @@ class BroadcastForm(StatesGroup):
     message = State()
 
 
+class AdminSearchForm(StatesGroup):
+    query = State()
+
+
+class DepositRejectReasonForm(StatesGroup):
+    reason = State()
+
+
+class RefundReasonForm(StatesGroup):
+    reason = State()
+
+
 def is_admin(user_id: int) -> bool:
+    settings = get_settings()
+    return user_id in settings.admin_ids or user_id in settings.support_admin_ids or user_id in settings.stock_manager_ids
+
+
+def is_owner_admin(user_id: int) -> bool:
     return user_id in get_settings().admin_ids
 
 
@@ -89,6 +108,10 @@ def _is_product_selection(text: str) -> bool:
 
 def _is_add_stock_action(text: str) -> bool:
     return _starts_with_any(text, ("Add Stock #",))
+
+
+def _is_export_stock_action(text: str) -> bool:
+    return _starts_with_any(text, ("Export Stock #",))
 
 
 def _is_edit_product_action(text: str) -> bool:
@@ -148,6 +171,19 @@ def _is_member_selection(text: str) -> bool:
     return _starts_with_any(text, ("Member #",))
 
 
+def _page_from_text(text: str, prefix: str) -> int | None:
+    normalized = _button_text(text)
+    if not (normalized.startswith(f"{prefix} Page ") or normalized.startswith(f"{prefix} PAGE ")):
+        return None
+    match = re.search(r"Page\s+(\d+)", normalized, flags=re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def _page_slice(items: list[object], page: int, per_page: int = 10) -> list[object]:
+    start = max(page - 1, 0) * per_page
+    return items[start : start + per_page]
+
+
 def _member_status(user: object) -> str:
     flags = []
     if getattr(user, "is_banned", False):
@@ -192,6 +228,20 @@ def _id_from_hash_button(text: str, prefix: str) -> int | None:
     if not match:
         return None
     return int(match.group(1))
+
+
+async def _admin_dashboard_text(session: AsyncSession) -> str:
+    stats = await admin_stats(session)
+    today = await sales_report(session, days=1)
+    return (
+        "Admin Dashboard\n\n"
+        f"Today Orders: {today['orders']}\n"
+        f"Today Revenue: {money(today['revenue'])}\n"
+        f"Pending Deposits: {stats['pending_deposits']}\n"
+        f"Total Users: {stats['users']}\n"
+        f"Products: {stats['products']}\n"
+        f"Unsold Stock: {stats['stock']}"
+    )
 
 
 def _method_label(method: str) -> str:
@@ -290,39 +340,51 @@ def parse_stock_file(file_name: str, data: bytes) -> list[str]:
     raise ValueError("Unsupported file type.")
 
 
+def _xlsx_file(filename: str, rows: list[list[object]], sheet_name: str = "Export") -> BufferedInputFile:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = sheet_name
+    for row in rows:
+        worksheet.append(row)
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return BufferedInputFile(output.read(), filename=filename)
+
+
 @router.message(Command("admin"))
-async def admin_command(message: Message) -> None:
+async def admin_command(message: Message, session: AsyncSession) -> None:
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
     await message.answer(
-        "Admin Panel\n\nManage products, stock, deposits, coupons, and store statistics.",
+        await _admin_dashboard_text(session),
         reply_markup=admin_reply_menu(),
     )
 
 
 @router.callback_query(F.data == "admin")
-async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
+async def admin_callback(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     await state.clear()
     if not is_admin(callback.from_user.id):
         await callback.answer("Unauthorized.", show_alert=True)
         return
     await callback.message.edit_text("Admin Panel")
     await callback.message.answer(
-        "Admin Panel\n\nManage products, stock, deposits, coupons, and store statistics.",
+        await _admin_dashboard_text(session),
         reply_markup=admin_reply_menu(),
     )
     await callback.answer()
 
 
 @router.message(StateFilter("*"), F.text.in_({"Admin Panel", "ADMIN PANEL", "⚙️ Admin Panel"}))
-async def admin_panel_text(message: Message, state: FSMContext) -> None:
+async def admin_panel_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
     await message.answer(
-        "Admin Panel\n\nManage products, stock, deposits, coupons, and store statistics.",
+        await _admin_dashboard_text(session),
         reply_markup=admin_reply_menu(),
     )
 
@@ -411,6 +473,133 @@ async def broadcast_finish(message: Message, state: FSMContext, session: AsyncSe
     await message.answer(f"Broadcast completed.\n\nSent: {sent}\nFailed: {failed}", reply_markup=admin_reply_menu())
 
 
+@router.message(StateFilter("*"), F.text.in_({"Admin Search", "🔎 Admin Search"}))
+async def admin_search_start(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    await state.set_state(AdminSearchForm.query)
+    await message.answer(
+        "Admin Search\n\n"
+        "Send one of these:\n"
+        "user 7562995992\n"
+        "product gmail\n"
+        "order 12"
+    )
+
+
+@router.message(AdminSearchForm.query)
+async def admin_search_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    text = message.text.strip()
+    if text.lower().startswith("user "):
+        user = await find_user(session, text.split(" ", 1)[1])
+        if not user:
+            await message.answer("User not found.", reply_markup=admin_reply_menu())
+            return
+        await message.answer(
+            await _member_activity_text(session, user),
+            reply_markup=member_actions_reply_menu(user.id, user.is_banned, user.is_restricted),
+        )
+        return
+    if text.lower().startswith("product "):
+        rows = await search_products(session, text.split(" ", 1)[1])
+        if not rows:
+            await message.answer("Product not found.", reply_markup=admin_reply_menu())
+            return
+        response = "Product Search\n\n" + "\n".join(
+            f"#{product.id} {product.name} - {money(product.price)} - stock {stock} - {'active' if product.is_active else 'disabled'}"
+            for product, stock in rows
+        )
+        await message.answer(response, reply_markup=admin_products_reply_menu(rows))
+        return
+    if text.lower().startswith("order "):
+        raw_id = text.split(" ", 1)[1].strip()
+        if not raw_id.isdigit():
+            await message.answer("Send order ID like: order 12", reply_markup=admin_reply_menu())
+            return
+        order = await get_order(session, int(raw_id))
+        if not order:
+            await message.answer("Order not found.", reply_markup=admin_reply_menu())
+            return
+        await message.answer(
+            "Order Details\n\n"
+            f"Order ID: #{order.id}\n"
+            f"User ID: #{order.user_id}\n"
+            f"Product ID: #{order.product_id}\n"
+            f"Amount: {money(order.amount)}\n"
+            f"Status: {order.status.value}\n"
+            f"Created: {order.created_at:%Y-%m-%d %H:%M}",
+            reply_markup=refund_confirm_reply_menu(order.id) if order.status.value != "refunded" else admin_reply_menu(),
+        )
+        return
+    await message.answer("Unknown search. Use: user ..., product ..., or order ...", reply_markup=admin_reply_menu())
+
+
+@router.message(StateFilter("*"), F.text.in_({"Export Data", "📤 Export Data"}))
+async def export_menu_text(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    await message.answer("Export Data\n\nSelect what you want to export.", reply_markup=export_reply_menu())
+
+
+@router.message(StateFilter("*"), F.text.in_({"Export Users", "📤 Export Users"}))
+async def export_users_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    users = await list_all_users(session)
+    rows = [["DB ID", "Telegram ID", "Name", "Username", "Balance", "Status", "Note", "Joined"]]
+    for user in users:
+        rows.append([user.id, user.telegram_id, user.first_name or "", user.username or "", float(user.balance), _member_status(user), user.admin_note or "", str(user.created_at)])
+    await message.answer_document(_xlsx_file("users_export.xlsx", rows, "Users"), caption="Users export ready.", reply_markup=admin_reply_menu())
+
+
+@router.message(StateFilter("*"), F.text.in_({"Export Orders", "📤 Export Orders"}))
+async def export_orders_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    orders = await all_orders(session)
+    rows = [["Order ID", "User ID", "Product ID", "Amount", "Status", "Created"]]
+    for order in orders:
+        rows.append([order.id, order.user_id, order.product_id, float(order.amount), order.status.value, str(order.created_at)])
+    await message.answer_document(_xlsx_file("orders_export.xlsx", rows, "Orders"), caption="Orders export ready.", reply_markup=admin_reply_menu())
+
+
+@router.message(StateFilter("*"), F.text.in_({"Export Deposits", "📤 Export Deposits"}))
+async def export_deposits_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    deposits = await all_deposits(session)
+    rows = [["Deposit ID", "User ID", "Amount", "Method", "TXID", "Status", "OCR", "Created", "Reviewed"]]
+    for deposit in deposits:
+        rows.append([deposit.id, deposit.user_id, float(deposit.amount), deposit.method, deposit.transaction_id or "", deposit.status.value, deposit.ocr_status or "", str(deposit.created_at), str(deposit.reviewed_at or "")])
+    await message.answer_document(_xlsx_file("deposits_export.xlsx", rows, "Deposits"), caption="Deposits export ready.", reply_markup=admin_reply_menu())
+
+
+@router.message(StateFilter("*"), F.text.in_({"Export Products", "📤 Export Products"}))
+async def export_products_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    products = await list_all_products(session)
+    rows = [["Product ID", "Name", "Price", "Unsold Stock", "Active", "Description"]]
+    for product, stock in products:
+        rows.append([product.id, product.name, float(product.price), stock, product.is_active, product.description or ""])
+    await message.answer_document(_xlsx_file("products_export.xlsx", rows, "Products"), caption="Products export ready.", reply_markup=admin_reply_menu())
+
+
 @router.message(StateFilter("*"), F.text.in_({"Members", "MEMBERS", "👥 Members", "Search Member", "🔎 Search Member"}))
 async def members_start_text(message: Message, state: FSMContext) -> None:
     await state.clear()
@@ -433,7 +622,7 @@ async def all_members_text(message: Message, state: FSMContext, session: AsyncSe
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    users = await list_recent_users(session, limit=20)
+    users = _page_slice(await list_all_users(session), page=1, per_page=10)
     if not users:
         await message.answer("Members\n\nNo members found.", reply_markup=admin_reply_menu())
         return
@@ -449,6 +638,28 @@ async def all_members_text(message: Message, state: FSMContext, session: AsyncSe
         + "\n\nSelect a member from the keyboard below.",
         reply_markup=members_reply_menu(users),
     )
+
+
+@router.message(StateFilter("*"), F.text.func(lambda text: _page_from_text(text, "Members") is not None))
+async def members_page_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    page = _page_from_text(message.text, "Members") or 1
+    users = _page_slice(await list_all_users(session), page=page, per_page=10)
+    if not users:
+        await message.answer("No members on this page.", reply_markup=paged_reply_menu("Members", page))
+        return
+    lines = []
+    for user in users:
+        username = f"@{user.username}" if user.username else "no_username"
+        lines.append(f"#{user.id} | {user.first_name or 'Unknown'} | {username} | TG: {user.telegram_id} | {money(user.balance)} | {_member_status(user)}")
+    await message.answer(
+        f"All Members - Page {page}\n\n" + "\n".join(lines),
+        reply_markup=members_reply_menu(users),
+    )
+    await message.answer("Navigate member pages.", reply_markup=paged_reply_menu("Members", page))
 
 
 @router.message(StateFilter("*"), F.text.func(_is_member_selection))
@@ -672,9 +883,27 @@ async def refund_order_confirm_text(message: Message, state: FSMContext, session
     if not order_id:
         await message.answer("Invalid order action.", reply_markup=admin_reply_menu())
         return
+    await state.update_data(order_id=order_id)
+    await state.set_state(RefundReasonForm.reason)
+    await message.answer(
+        f"Refund Reason\n\nSend reason for order #{order_id} refund.\n\nExample: duplicate order / stock issue / manual adjustment"
+    )
+
+
+@router.message(RefundReasonForm.reason)
+async def refund_reason_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    reason = message.text.strip()
+    if not reason:
+        await message.answer("Please send a refund reason.")
+        return
+    order_id = int(data["order_id"])
     ok, text, order = await refund_order(session, order_id)
+    await state.clear()
     if order:
-        await log_admin_action(session, message.from_user.id, "refund_order", "order", order.id, details=text)
+        await log_admin_action(session, message.from_user.id, "refund_order", "order", order.id, details=f"{text}; reason={reason}")
         from bot.database.models import User
 
         user = await session.get(User, order.user_id)
@@ -685,6 +914,7 @@ async def refund_order_confirm_text(message: Message, state: FSMContext, session
                     "Order Refund\n\n"
                     f"Order ID: #{order.id}\n"
                     f"Refunded Amount: {money(order.amount)}\n"
+                    f"Reason: {reason}\n"
                     "Your balance has been updated.",
                 )
             except Exception:
@@ -717,7 +947,7 @@ async def admin_products_text(message: Message, session: AsyncSession, state: FS
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    rows = await list_all_products(session)
+    rows = _page_slice(await list_all_products(session), page=1, per_page=10)
     if not rows:
         await message.answer("No products created.", reply_markup=admin_reply_menu())
     else:
@@ -726,6 +956,26 @@ async def admin_products_text(message: Message, session: AsyncSession, state: FS
             for product, stock in rows
         )
         await message.answer(text, reply_markup=admin_products_reply_menu(rows))
+        await message.answer("Navigate product pages.", reply_markup=paged_reply_menu("Products", 1))
+
+
+@router.message(StateFilter("*"), F.text.func(lambda text: _page_from_text(text, "Products") is not None))
+async def products_page_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    page = _page_from_text(message.text, "Products") or 1
+    rows = _page_slice(await list_all_products(session), page=page, per_page=10)
+    if not rows:
+        await message.answer("No products on this page.", reply_markup=paged_reply_menu("Products", page))
+        return
+    text = f"Product List - Page {page}\n\n" + "\n".join(
+        f"#{product.id} {product.name} - {money(product.price)} - stock {stock} - {'active' if product.is_active else 'disabled'}"
+        for product, stock in rows
+    )
+    await message.answer(text, reply_markup=admin_products_reply_menu(rows))
+    await message.answer("Navigate product pages.", reply_markup=paged_reply_menu("Products", page))
 
 
 @router.message(StateFilter("*"), F.text.func(_is_product_selection))
@@ -938,6 +1188,27 @@ async def add_stock_for_product_text(message: Message, state: FSMContext) -> Non
     await message.answer(
         "Send bulk stock lines, one item per line, or upload .xlsx/.csv/.txt.\n\n"
         "email1@example.com|password1\nemail2@example.com|password2"
+    )
+
+
+@router.message(StateFilter("*"), F.text.func(_is_export_stock_action))
+async def export_stock_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Export Stock #")
+    if not product_id:
+        await message.answer("Invalid product action.", reply_markup=admin_reply_menu())
+        return
+    rows = [["Stock ID", "Product ID", "Payload", "Created"]]
+    for item in await unsold_stock_items(session, product_id):
+        rows.append([item.id, item.product_id, item.payload, str(item.created_at)])
+    await log_admin_action(session, message.from_user.id, "export_stock", "product", product_id, details=f"items={len(rows) - 1}")
+    await message.answer_document(
+        _xlsx_file(f"product_{product_id}_unsold_stock.xlsx", rows, "Unsold Stock"),
+        caption=f"Unsold stock export ready for product #{product_id}.",
+        reply_markup=admin_reply_menu(),
     )
 
 
@@ -1180,11 +1451,17 @@ async def deposits(callback: CallbackQuery, session: AsyncSession) -> None:
 
 
 @router.callback_query(F.data.startswith("deposit_approve:") | F.data.startswith("deposit_reject:"))
-async def review_deposit_callback(callback: CallbackQuery, session: AsyncSession) -> None:
+async def review_deposit_callback(callback: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("Unauthorized.", show_alert=True)
         return
     action, raw_id = callback.data.split(":", 1)
+    if action == "deposit_reject":
+        await state.update_data(deposit_id=int(raw_id))
+        await state.set_state(DepositRejectReasonForm.reason)
+        await callback.message.answer(f"Reject Reason\n\nSend reason for deposit #{raw_id} rejection.")
+        await callback.answer()
+        return
     deposit = await review_deposit(session, int(raw_id), approve=action == "deposit_approve")
     if not deposit:
         await callback.answer("Deposit not found or already reviewed.", show_alert=True)
@@ -1233,6 +1510,11 @@ async def review_deposit_text(message: Message, session: AsyncSession, state: FS
     if not deposit_id:
         await message.answer("Invalid deposit action.")
         return
+    if not approve:
+        await state.update_data(deposit_id=deposit_id)
+        await state.set_state(DepositRejectReasonForm.reason)
+        await message.answer(f"Reject Reason\n\nSend reason for deposit #{deposit_id} rejection.")
+        return
     deposit = await review_deposit(session, deposit_id, approve=approve)
     if not deposit:
         await message.answer("Deposit not found or already reviewed.", reply_markup=admin_reply_menu())
@@ -1260,6 +1542,48 @@ async def review_deposit_text(message: Message, session: AsyncSession, state: FS
         "deposit",
         deposit.id,
         details=f"amount={float(deposit.amount)}",
+    )
+    await _send_next_deposit_after_review(message, session, deposit)
+
+
+@router.message(DepositRejectReasonForm.reason)
+async def deposit_reject_reason_finish(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    reason = message.text.strip()
+    if not reason:
+        await message.answer("Please send a reject reason.")
+        return
+    data = await state.get_data()
+    deposit_id = int(data["deposit_id"])
+    deposit = await review_deposit(session, deposit_id, approve=False)
+    await state.clear()
+    if not deposit:
+        await message.answer("Deposit not found or already reviewed.", reply_markup=admin_reply_menu())
+        return
+    from bot.database.models import User
+
+    user = await session.get(User, deposit.user_id)
+    if user:
+        try:
+            await message.bot.send_message(
+                user.telegram_id,
+                "Deposit Update\n\n"
+                f"Request ID: #{deposit.id}\n"
+                f"Amount: {money(deposit.amount)}\n"
+                "Status: rejected\n"
+                f"Reason: {reason}\n\n"
+                "Please contact support if this was a mistake.",
+            )
+        except Exception:
+            pass
+    await log_admin_action(
+        session,
+        message.from_user.id,
+        "reject_deposit",
+        "deposit",
+        deposit.id,
+        details=f"amount={float(deposit.amount)}; reason={reason}",
     )
     await _send_next_deposit_after_review(message, session, deposit)
 

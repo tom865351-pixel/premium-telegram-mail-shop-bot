@@ -29,6 +29,33 @@ async def list_all_products(session: AsyncSession) -> list[tuple[Product, int]]:
     return [(product, int(stock_count)) for product, stock_count in result.all()]
 
 
+async def search_products(session: AsyncSession, query: str, limit: int = 10) -> list[tuple[Product, int]]:
+    clean = query.strip()
+    statement = (
+        select(Product, func.count(StockItem.id))
+        .outerjoin(StockItem, (StockItem.product_id == Product.id) & (StockItem.is_sold.is_(False)))
+        .where(Product.name.not_like("[deleted #%"))
+        .group_by(Product.id)
+        .order_by(Product.id.desc())
+        .limit(limit)
+    )
+    if clean.isdigit():
+        statement = statement.where(Product.id == int(clean))
+    else:
+        statement = statement.where(Product.name.ilike(f"%{clean}%"))
+    result = await session.execute(statement)
+    return [(product, int(stock_count)) for product, stock_count in result.all()]
+
+
+async def unsold_stock_items(session: AsyncSession, product_id: int) -> list[StockItem]:
+    result = await session.execute(
+        select(StockItem)
+        .where(StockItem.product_id == product_id, StockItem.is_sold.is_(False))
+        .order_by(StockItem.id)
+    )
+    return list(result.scalars().all())
+
+
 async def create_product(session: AsyncSession, name: str, price: float, description: str) -> Product:
     product = Product(name=name.strip(), price=price, description=description.strip())
     session.add(product)
