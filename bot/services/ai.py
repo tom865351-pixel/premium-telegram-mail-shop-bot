@@ -76,6 +76,41 @@ def _gemini_url(model: str, api_key: str) -> str:
     return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
 
+def _local_agent_fallback(user_text: str) -> dict[str, str]:
+    text = user_text.lower()
+    compact = re.sub(r"[^a-z0-9\u0980-\u09ff]+", " ", text)
+
+    if any(word in compact for word in ("scam", "fraud", "cheat", "reply", "help", "support", "admin", "problem", "somossa", "সমস্যা")):
+        return {
+            "action": "support",
+            "reply": "আপনার সমস্যাটা শুনে খারাপ লাগলো। চিন্তা করবেন না, support/admin-er sathe contact korle issue ta check kore help kora hobe। 🛟🙏",
+        }
+    if any(word in compact for word in ("deposit", "diposit", "top up", "payment", "bkash", "nagad", "rocket", "টাকা")):
+        return {
+            "action": "deposit",
+            "reply": "অবশ্যই, deposit method open kore dilam। Payment kore TXID/screenshot submit korun। 💳✅",
+        }
+    if any(word in compact for word in ("balance", "blance", "profile", "amar taka", "ব্যালেন্স")):
+        return {"action": "profile", "reply": "আপনার profile/balance info দেখাচ্ছি। 👤💰"}
+    if any(word in compact for word in ("order", "histry", "history", "invoice", "অর্ডার")):
+        return {"action": "orders", "reply": "আপনার recent order history দেখাচ্ছি। 📦🧾"}
+    if any(word in compact for word in ("status", "pending", "approved")):
+        return {"action": "deposit_status", "reply": "আপনার deposit status দেখাচ্ছি। 🧾✅"}
+    if any(word in compact for word in ("shop", "product", "gmail", "mail", "buy", "stock", "কিন")):
+        return {"action": "shop", "reply": "Product list open kore dilam। পছন্দের item select করুন। 🛍️✨"}
+    if any(word in compact for word in ("sell", "sale", "offer", "বিক্রি")):
+        return {"action": "sell", "reply": "Sell request korte details pathan। আমি admin-er kache পাঠিয়ে দেব। 💼📩"}
+    if any(word in compact for word in ("coupon", "code", "discount")):
+        return {"action": "coupon", "reply": "Coupon code pathan, ami check kore দিচ্ছি। 🏷️✅"}
+    if any(word in compact for word in ("refer", "referral", "commission")):
+        return {"action": "referral", "reply": "Referral details দেখাচ্ছি। Invite করলে commission পেতে পারেন। 🎁🤝"}
+
+    return {
+        "action": "answer",
+        "reply": "জি, বুঝলাম। আপনি কী করতে চান একটু বলুন: shop, deposit, order, balance, sell, support - আমি help করে দিচ্ছি। 🤖✨",
+    }
+
+
 async def ask_gemini(user_text: str, user_context: str = "") -> str:
     settings = get_settings()
     if not settings.ai_enabled:
@@ -121,7 +156,7 @@ async def ask_gemini(user_text: str, user_context: str = "") -> str:
                     continue
                 return f"AI error: {message}"
         else:
-            return "AI ekhon busy ache. Ektu pore abar try korun."
+            return _local_agent_fallback(user_text)["reply"]
 
     try:
         parts = data["candidates"][0]["content"]["parts"]
@@ -202,10 +237,7 @@ async def ask_gemini_agent(user_text: str, user_context: str = "") -> dict[str, 
                     continue
                 return {"action": "answer", "reply": f"AI error: {message}"}
         else:
-            return {
-                "action": "answer",
-                "reply": "AI ekhon busy ache. Ektu pore abar message korun, ba direct menu button use korun.",
-            }
+            return _local_agent_fallback(user_text)
 
     try:
         parts = data["candidates"][0]["content"]["parts"]
