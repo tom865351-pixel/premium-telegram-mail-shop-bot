@@ -8,9 +8,9 @@ class Settings(BaseSettings):
     bot_token: str = Field(alias="BOT_TOKEN")
     database_url: str = Field(alias="DATABASE_URL")
     database_public_url: str | None = Field(default=None, alias="DATABASE_PUBLIC_URL")
-    admin_ids: set[int] = Field(default_factory=set, alias="ADMIN_IDS")
-    support_admin_ids: set[int] = Field(default_factory=set, alias="SUPPORT_ADMIN_IDS")
-    stock_manager_ids: set[int] = Field(default_factory=set, alias="STOCK_MANAGER_IDS")
+    admin_ids_raw: str = Field(default="", alias="ADMIN_IDS")
+    support_admin_ids_raw: str = Field(default="", alias="SUPPORT_ADMIN_IDS")
+    stock_manager_ids_raw: str = Field(default="", alias="STOCK_MANAGER_IDS")
 
     binance_pay_id: str | None = Field(default=None, alias="BINANCE_PAY_ID")
     usdt_trc20_address: str | None = Field(default=None, alias="USDT_TRC20_ADDRESS")
@@ -37,9 +37,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    @field_validator("admin_ids", "support_admin_ids", "stock_manager_ids", mode="before")
-    @classmethod
-    def parse_admin_ids(cls, value: str | set[int] | list[int] | None) -> set[int]:
+    @staticmethod
+    def parse_id_set(value: str | set[int] | list[int] | None) -> set[int]:
         if isinstance(value, set):
             return value
         if isinstance(value, list):
@@ -47,6 +46,25 @@ class Settings(BaseSettings):
         if not value:
             return set()
         return {int(item.strip()) for item in str(value).split(",") if item.strip()}
+
+    @property
+    def admin_ids(self) -> set[int]:
+        return self.parse_id_set(self.admin_ids_raw)
+
+    @property
+    def support_admin_ids(self) -> set[int]:
+        return self.parse_id_set(self.support_admin_ids_raw)
+
+    @property
+    def stock_manager_ids(self) -> set[int]:
+        return self.parse_id_set(self.stock_manager_ids_raw)
+
+    @field_validator("admin_ids_raw", "support_admin_ids_raw", "stock_manager_ids_raw", mode="before")
+    @classmethod
+    def normalize_id_list(cls, value: str | None) -> str:
+        if not value:
+            return ""
+        return str(value)
 
     @field_validator("database_url", mode="before")
     @classmethod
