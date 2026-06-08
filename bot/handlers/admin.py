@@ -114,6 +114,10 @@ def _is_export_stock_action(text: str) -> bool:
     return _starts_with_any(text, ("Export Stock #",))
 
 
+def _is_exact_button(text: str, label: str) -> bool:
+    return _button_text(text).casefold() == label.casefold()
+
+
 def _is_edit_product_action(text: str) -> bool:
     return _starts_with_any(text, ("Edit Product #",))
 
@@ -539,7 +543,7 @@ async def admin_search_finish(message: Message, state: FSMContext, session: Asyn
     await message.answer("Unknown search. Use: user ..., product ..., or order ...", reply_markup=admin_reply_menu())
 
 
-@router.message(StateFilter("*"), F.text.in_({"Export Data", "📤 Export Data"}))
+@router.message(StateFilter("*"), F.text.func(lambda text: _is_exact_button(text, "Export Data")))
 async def export_menu_text(message: Message, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
@@ -548,12 +552,13 @@ async def export_menu_text(message: Message, state: FSMContext) -> None:
     await message.answer("Export Data\n\nSelect what you want to export.", reply_markup=export_reply_menu())
 
 
-@router.message(StateFilter("*"), F.text.in_({"Export Users", "📤 Export Users"}))
+@router.message(StateFilter("*"), F.text.func(lambda text: _is_exact_button(text, "Export Users")))
 async def export_users_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
+    await message.answer("Preparing users export...")
     users = await list_all_users(session)
     rows = [["DB ID", "Telegram ID", "Name", "Username", "Balance", "Status", "Note", "Joined"]]
     for user in users:
@@ -561,12 +566,13 @@ async def export_users_text(message: Message, session: AsyncSession, state: FSMC
     await message.answer_document(_xlsx_file("users_export.xlsx", rows, "Users"), caption="Users export ready.", reply_markup=admin_reply_menu())
 
 
-@router.message(StateFilter("*"), F.text.in_({"Export Orders", "📤 Export Orders"}))
+@router.message(StateFilter("*"), F.text.func(lambda text: _is_exact_button(text, "Export Orders")))
 async def export_orders_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
+    await message.answer("Preparing orders export...")
     orders = await all_orders(session)
     rows = [["Order ID", "User ID", "Product ID", "Amount", "Status", "Created"]]
     for order in orders:
@@ -574,12 +580,13 @@ async def export_orders_text(message: Message, session: AsyncSession, state: FSM
     await message.answer_document(_xlsx_file("orders_export.xlsx", rows, "Orders"), caption="Orders export ready.", reply_markup=admin_reply_menu())
 
 
-@router.message(StateFilter("*"), F.text.in_({"Export Deposits", "📤 Export Deposits"}))
+@router.message(StateFilter("*"), F.text.func(lambda text: _is_exact_button(text, "Export Deposits")))
 async def export_deposits_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
+    await message.answer("Preparing deposits export...")
     deposits = await all_deposits(session)
     rows = [["Deposit ID", "User ID", "Amount", "Method", "TXID", "Status", "OCR", "Created", "Reviewed"]]
     for deposit in deposits:
@@ -587,12 +594,13 @@ async def export_deposits_text(message: Message, session: AsyncSession, state: F
     await message.answer_document(_xlsx_file("deposits_export.xlsx", rows, "Deposits"), caption="Deposits export ready.", reply_markup=admin_reply_menu())
 
 
-@router.message(StateFilter("*"), F.text.in_({"Export Products", "📤 Export Products"}))
+@router.message(StateFilter("*"), F.text.func(lambda text: _is_exact_button(text, "Export Products")))
 async def export_products_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
+    await message.answer("Preparing products export...")
     products = await list_all_products(session)
     rows = [["Product ID", "Name", "Price", "Unsold Stock", "Active", "Description"]]
     for product, stock in products:
