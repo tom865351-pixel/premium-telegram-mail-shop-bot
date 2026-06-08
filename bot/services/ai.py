@@ -107,7 +107,14 @@ def _extract_json(text: str) -> dict[str, str] | None:
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError:
-        return None
+        action_match = re.search(r'"action"\s*:\s*"([^"]+)"', cleaned, flags=re.IGNORECASE)
+        if not action_match:
+            return None
+        reply_match = re.search(r'"reply"\s*:\s*"([^"]*)"', cleaned, flags=re.IGNORECASE | re.DOTALL)
+        return {
+            "action": action_match.group(1).strip().lower(),
+            "reply": reply_match.group(1).strip() if reply_match else "",
+        }
     if not isinstance(data, dict):
         return None
     return {
@@ -118,12 +125,11 @@ def _extract_json(text: str) -> dict[str, str] | None:
 
 async def ask_gemini_agent(user_text: str, user_context: str = "") -> dict[str, str]:
     settings = get_settings()
-    fallback = {
-        "action": "answer",
-        "reply": await ask_gemini(user_text, user_context=user_context),
-    }
     if not settings.ai_enabled or settings.ai_provider.lower() != "gemini" or not settings.gemini_api_key:
-        return fallback
+        return {
+            "action": "answer",
+            "reply": "AI properly configured na. Railway Variables-e GEMINI_API_KEY check korun.",
+        }
 
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -157,6 +163,11 @@ async def ask_gemini_agent(user_text: str, user_context: str = "") -> dict[str, 
             if response.status >= 400:
                 error = data.get("error", {}) if isinstance(data, dict) else {}
                 message = error.get("message") or f"Gemini error {response.status}"
+                if "high demand" in message.lower() or response.status in {429, 503}:
+                    return {
+                        "action": "answer",
+                        "reply": "AI ekhon busy ache. Ektu pore abar message korun, ba direct menu button use korun.",
+                    }
                 return {"action": "answer", "reply": f"AI error: {message}"}
 
     try:
@@ -182,8 +193,11 @@ async def ask_gemini_agent(user_text: str, user_context: str = "") -> dict[str, 
         }
         if parsed["action"] not in allowed:
             parsed["action"] = "answer"
-        if not parsed["reply"]:
+        if not parsed["reply"] and parsed["action"] == "answer":
             parsed["reply"] = "Bujhlam. Ami help kortesi."
         return parsed
 
-    return {"action": "answer", "reply": raw_text.strip() or fallback["reply"]}
+    clean_text = raw_text.strip()
+    if clean_text.startswith("{") and '"action"' in clean_text:
+        return {"action": "answer", "reply": "Bujhlam. Arektu details bolen, ami help kortesi."}
+    return {"action": "answer", "reply": clean_text or "Bujhlam. Arektu details bolen, ami help kortesi."}
