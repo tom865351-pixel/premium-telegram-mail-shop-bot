@@ -45,6 +45,28 @@ JSON schema:
 """
 
 
+def _gemini_model_candidates(primary_model: str) -> list[str]:
+    fallback_models = (
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash",
+    )
+    models = [primary_model]
+    for model in fallback_models:
+        if model not in models:
+            models.append(model)
+    return models
+
+
+def _is_retryable_error(status: int, message: str) -> bool:
+    lowered = message.lower()
+    return status in {429, 503} or "high demand" in lowered or "overloaded" in lowered
+
+
+def _gemini_url(model: str, api_key: str) -> str:
+    return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+
 async def ask_gemini(user_text: str, user_context: str = "") -> str:
     settings = get_settings()
     if not settings.ai_enabled:
@@ -54,10 +76,6 @@ async def ask_gemini(user_text: str, user_context: str = "") -> str:
     if not settings.gemini_api_key:
         return "Gemini API key is missing. Please add GEMINI_API_KEY in Railway Variables."
 
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{settings.gemini_model}:generateContent?key={settings.gemini_api_key}"
-    )
     payload = {
         "contents": [
             {
@@ -80,13 +98,21 @@ async def ask_gemini(user_text: str, user_context: str = "") -> str:
     }
 
     timeout = aiohttp.ClientTimeout(total=25)
+    last_error = ""
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(url, json=payload) as response:
-            data = await response.json(content_type=None)
-            if response.status >= 400:
+        for model in _gemini_model_candidates(settings.gemini_model):
+            async with session.post(_gemini_url(model, settings.gemini_api_key), json=payload) as response:
+                data = await response.json(content_type=None)
+                if response.status < 400:
+                    break
                 error = data.get("error", {}) if isinstance(data, dict) else {}
                 message = error.get("message") or f"Gemini error {response.status}"
+                last_error = message
+                if _is_retryable_error(response.status, message):
+                    continue
                 return f"AI error: {message}"
+        else:
+            return "AI ekhon busy ache. Ektu pore abar try korun."
 
     try:
         parts = data["candidates"][0]["content"]["parts"]
@@ -131,10 +157,6 @@ async def ask_gemini_agent(user_text: str, user_context: str = "") -> dict[str, 
             "reply": "AI properly configured na. Railway Variables-e GEMINI_API_KEY check korun.",
         }
 
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{settings.gemini_model}:generateContent?key={settings.gemini_api_key}"
-    )
     payload = {
         "contents": [
             {
@@ -157,18 +179,24 @@ async def ask_gemini_agent(user_text: str, user_context: str = "") -> dict[str, 
     }
 
     timeout = aiohttp.ClientTimeout(total=25)
+    last_error = ""
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(url, json=payload) as response:
-            data = await response.json(content_type=None)
-            if response.status >= 400:
+        for model in _gemini_model_candidates(settings.gemini_model):
+            async with session.post(_gemini_url(model, settings.gemini_api_key), json=payload) as response:
+                data = await response.json(content_type=None)
+                if response.status < 400:
+                    break
                 error = data.get("error", {}) if isinstance(data, dict) else {}
                 message = error.get("message") or f"Gemini error {response.status}"
-                if "high demand" in message.lower() or response.status in {429, 503}:
-                    return {
-                        "action": "answer",
-                        "reply": "AI ekhon busy ache. Ektu pore abar message korun, ba direct menu button use korun.",
-                    }
+                last_error = message
+                if _is_retryable_error(response.status, message):
+                    continue
                 return {"action": "answer", "reply": f"AI error: {message}"}
+        else:
+            return {
+                "action": "answer",
+                "reply": "AI ekhon busy ache. Ektu pore abar message korun, ba direct menu button use korun.",
+            }
 
     try:
         parts = data["candidates"][0]["content"]["parts"]
