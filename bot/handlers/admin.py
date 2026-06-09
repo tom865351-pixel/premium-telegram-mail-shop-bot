@@ -3,6 +3,7 @@ import re
 from io import BytesIO, StringIO
 
 from aiogram import F, Router
+from aiogram.enums import ContentType
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -1283,12 +1284,14 @@ async def stock_product_id(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(StockForm.payload, F.document)
-async def stock_payload_file(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def _process_stock_document(message: Message, state: FSMContext, session: AsyncSession) -> None:
     if not is_admin(message.from_user.id):
         return
 
     document = message.document
+    if not document:
+        await message.answer("Please upload a .xlsx, .csv, or .txt stock file.")
+        return
     file_name = document.file_name or ""
     if not file_name.lower().endswith(SUPPORTED_STOCK_EXTENSIONS):
         await message.answer("Unsupported file type. Please upload only .xlsx, .csv, or .txt stock files.")
@@ -1326,6 +1329,11 @@ async def stock_payload_file(message: Message, state: FSMContext, session: Async
     )
 
 
+@router.message(StockForm.payload, F.content_type == ContentType.DOCUMENT)
+async def stock_payload_file(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await _process_stock_document(message, state, session)
+
+
 @router.message(StockForm.payload)
 async def stock_payload(message: Message, state: FSMContext, session: AsyncSession) -> None:
     if not is_admin(message.from_user.id):
@@ -1344,9 +1352,13 @@ async def stock_payload(message: Message, state: FSMContext, session: AsyncSessi
     await message.answer(f"Stock Added\n\nAdded Items: {count}", reply_markup=admin_reply_menu())
 
 
-@router.message(StateFilter("*"), F.document)
-async def admin_document_without_stock_state(message: Message) -> None:
+@router.message(StateFilter("*"), F.content_type == ContentType.DOCUMENT)
+async def admin_document_without_stock_state(message: Message, state: FSMContext, session: AsyncSession) -> None:
     if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    if data.get("product_id"):
+        await _process_stock_document(message, state, session)
         return
     await message.answer(
         "File received, but no stock upload session is active.\n\n"
