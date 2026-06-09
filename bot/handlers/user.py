@@ -1202,14 +1202,23 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
     )
 
 
-@router.message(DepositForm.screenshot)
-async def deposit_screenshot(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def _process_deposit_screenshot(message: Message, state: FSMContext, session: AsyncSession) -> None:
     if not message.photo:
         await message.answer("Please upload a payment screenshot as a photo.")
         return
 
-    await message.answer("Payment screenshot received.\n\nChecking and submitting your deposit request...")
     data = await state.get_data()
+    required = {"amount", "transaction_id", "method"}
+    if not required.issubset(data):
+        await state.clear()
+        await message.answer(
+            "Payment screenshot received, but deposit session was not found.\n\n"
+            "Please start again: Top Up > payment method > amount > TXID > screenshot.",
+            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        )
+        return
+
+    await message.answer("Payment screenshot received.\n\nChecking and submitting your deposit request...")
     user = await get_or_create_user(session, message.from_user)
     settings = get_settings()
     amount = float(data["amount"])
@@ -1291,6 +1300,25 @@ async def deposit_screenshot(message: Message, state: FSMContext, session: Async
             "This deposit needs admin verification before balance is added.",
             reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
         )
+
+
+@router.message(DepositForm.screenshot)
+async def deposit_screenshot(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await _process_deposit_screenshot(message, state, session)
+
+
+@router.message(StateFilter("*"), F.photo)
+async def photo_upload_fallback(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    data = await state.get_data()
+    current_state = await state.get_state()
+    if current_state == DepositForm.screenshot.state or {"amount", "transaction_id", "method"}.issubset(data):
+        await _process_deposit_screenshot(message, state, session)
+        return
+    await message.answer(
+        "Photo received.\n\n"
+        "If this is a payment screenshot, please start from Top Up and submit amount/TXID first.",
+        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+    )
 
 
 @router.callback_query(F.data == "coupon")
@@ -1455,6 +1483,20 @@ async def balance(message: Message, session: AsyncSession) -> None:
     if not user:
         user = await get_or_create_user(session, message.from_user)
     await message.answer(f"Balance: {money(user.balance)}")
+
+
+@router.message(StateFilter("*"), F.document)
+async def document_upload_fallback(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    from bot.handlers.admin import _process_stock_document, is_admin
+
+    if is_admin(message.from_user.id):
+        await _process_stock_document(message, state, session)
+        return
+    await message.answer(
+        "File received.\n\n"
+        "File upload is only available for admin stock upload right now.",
+        reply_markup=main_reply_menu(False),
+    )
 
 
 @router.message(StateFilter(None), F.text.func(lambda text: text not in RESERVED_REPLY_TEXTS and not is_admin_action_text(text)))
