@@ -3,7 +3,6 @@ import re
 from io import BytesIO, StringIO
 
 from aiogram import F, Router
-from aiogram.enums import ContentType
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -1329,7 +1328,7 @@ async def _process_stock_document(message: Message, state: FSMContext, session: 
     )
 
 
-@router.message(StockForm.payload, F.content_type == ContentType.DOCUMENT)
+@router.message(StockForm.payload, F.document)
 async def stock_payload_file(message: Message, state: FSMContext, session: AsyncSession) -> None:
     await _process_stock_document(message, state, session)
 
@@ -1352,7 +1351,7 @@ async def stock_payload(message: Message, state: FSMContext, session: AsyncSessi
     await message.answer(f"Stock Added\n\nAdded Items: {count}", reply_markup=admin_reply_menu())
 
 
-@router.message(StateFilter("*"), F.content_type == ContentType.DOCUMENT)
+@router.message(StateFilter("*"), F.document)
 async def admin_document_without_stock_state(message: Message, state: FSMContext, session: AsyncSession) -> None:
     if not is_admin(message.from_user.id):
         return
