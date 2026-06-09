@@ -103,7 +103,9 @@ def is_owner_admin(user_id: int) -> bool:
     return user_id in get_settings().admin_ids
 
 
-def _button_text(text: str) -> str:
+def _button_text(text: str | None) -> str:
+    if not text:
+        return ""
     return re.sub(r"^[^A-Za-z0-9#]+", "", text.strip()).strip()
 
 

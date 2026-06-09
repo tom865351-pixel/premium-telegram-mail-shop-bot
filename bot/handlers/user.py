@@ -336,7 +336,7 @@ def deposit_admin_text(
     )
 
 
-def clean_button_text(text: str) -> str:
+def clean_button_text(text: str | None) -> str:
     prefixes = (
         "🛒 ",
         "📦 ",
@@ -353,7 +353,7 @@ def clean_button_text(text: str) -> str:
         "📱 ",
         "🚀 ",
     )
-    cleaned = text.strip()
+    cleaned = (text or "").strip()
     changed = True
     while changed:
         changed = False
