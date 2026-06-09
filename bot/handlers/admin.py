@@ -83,10 +83,14 @@ class RefundReasonForm(StatesGroup):
     reason = State()
 
 
-@router.message(StateFilter("*"), lambda message: message.document is not None)
+def _is_admin_document_message(message: Message) -> bool:
+    settings = get_settings()
+    admin_ids = settings.admin_ids | settings.support_admin_ids | settings.stock_manager_ids
+    return bool(message.document and message.from_user and message.from_user.id in admin_ids)
+
+
+@router.message(StateFilter("*"), _is_admin_document_message)
 async def admin_document_catcher(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    if not is_admin(message.from_user.id):
-        return
     await _process_stock_document(message, state, session)
 
 

@@ -1535,3 +1535,47 @@ async def product_name_text(message: Message, session: AsyncSession, state: FSMC
         agent.get("reply", ""),
         keep_ai_chat=True,
     )
+
+
+@router.message(StateFilter("*"))
+async def universal_message_fallback(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    from bot.handlers.admin import _process_stock_document, is_admin
+
+    current_state = await state.get_state()
+    data = await state.get_data()
+
+    if message.document and is_admin(message.from_user.id):
+        await _process_stock_document(message, state, session)
+        return
+
+    if message.photo:
+        if current_state == DepositForm.screenshot.state or {"amount", "transaction_id", "method"}.issubset(data):
+            await _process_deposit_screenshot(message, state, session)
+            return
+        await message.answer(
+            "Photo peyechi.\n\n"
+            "Payment screenshot submit korte hole age Top Up theke amount and TXID dite hobe.",
+            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        )
+        return
+
+    if message.document:
+        await message.answer(
+            "File peyechi.\n\n"
+            "Stock file upload only admin panel-er Add Stock flow theke kaj korbe.",
+            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        )
+        return
+
+    if current_state:
+        await message.answer(
+            "Message peyechi, but ei step-e eta valid input na.\n\n"
+            "Please button/menu follow korun, ba Main Menu press kore abar try korun.",
+            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        )
+        return
+
+    await message.answer(
+        "Message peyechi. Menu theke option select korun, ba 🤖 AI button use korun.",
+        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+    )
