@@ -1208,6 +1208,7 @@ async def deposit_screenshot(message: Message, state: FSMContext, session: Async
         await message.answer("Please upload a payment screenshot as a photo.")
         return
 
+    await message.answer("Payment screenshot received.\n\nChecking and submitting your deposit request...")
     data = await state.get_data()
     user = await get_or_create_user(session, message.from_user)
     settings = get_settings()
