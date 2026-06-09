@@ -20,6 +20,9 @@ async def init_db() -> None:
         await conn.execute(text("ALTER TABLE deposits ADD COLUMN IF NOT EXISTS proof_file_id VARCHAR(255)"))
         await conn.execute(text("ALTER TABLE deposits ADD COLUMN IF NOT EXISTS ocr_status VARCHAR(64)"))
         await conn.execute(text("ALTER TABLE deposits ADD COLUMN IF NOT EXISTS ocr_details TEXT"))
+        await conn.execute(text("ALTER TABLE auto_stock_sources ADD COLUMN IF NOT EXISTS last_added_count INTEGER NOT NULL DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE auto_stock_sources ADD COLUMN IF NOT EXISTS last_error TEXT"))
+        await conn.execute(text("ALTER TABLE auto_stock_sources ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMP WITH TIME ZONE"))
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

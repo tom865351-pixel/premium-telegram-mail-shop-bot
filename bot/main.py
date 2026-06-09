@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -9,6 +11,7 @@ from bot.database import models  # noqa: F401
 from bot.database.session import init_db
 from bot.handlers import setup_routers
 from bot.middlewares.database import DatabaseMiddleware
+from bot.services.auto_stock import auto_stock_worker
 
 
 async def main() -> None:
@@ -24,4 +27,19 @@ async def main() -> None:
     dispatcher.include_router(setup_routers())
 
     logging.info("Telegram Mail Shop Bot started")
-    await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
+    async def notify_admin(admin_id: int, text: str) -> None:
+        with suppress(Exception):
+            await bot.send_message(admin_id, text)
+
+    auto_stock_task = None
+    if settings.admin_ids:
+        auto_stock_task = asyncio.create_task(auto_stock_worker(settings.admin_ids, notify_admin))
+        logging.info("Auto stock refill worker started")
+
+    try:
+        await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
+    finally:
+        if auto_stock_task:
+            auto_stock_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await auto_stock_task

@@ -28,7 +28,16 @@ from bot.keyboards.admin import (
 from bot.services.coupons import create_coupon
 from bot.services.audit import log_admin_action
 from bot.services.deposits import all_deposits, deposited_today, pending_deposits, review_deposit
-from bot.services.products import add_stock, add_stock_batch, create_product, delete_product, list_all_products, search_products, toggle_product, unsold_stock_items, update_product
+from bot.services.products import add_stock, add_stock_batch, create_product, delete_product, list_all_products, search_products, toggle_product, unsold_stock_count, unsold_stock_items, update_product
+from bot.services.auto_stock import (
+    DEFAULT_REFILL_THRESHOLD,
+    DEFAULT_TARGET_STOCK,
+    get_auto_stock_source,
+    refill_source,
+    reset_auto_stock_progress,
+    stop_auto_stock_source,
+    upsert_auto_stock_source,
+)
 from bot.services.stats import admin_stats
 from bot.services.orders import all_orders, get_order, order_count, refund_order, sales_report, total_spent
 from bot.services.users import adjust_user_balance, find_user, list_all_users, list_recent_users, set_user_banned, set_user_note, set_user_restricted
@@ -55,6 +64,10 @@ class StockForm(StatesGroup):
 
 class StockUrlForm(StatesGroup):
     url = State()
+
+
+class AutoStockForm(StatesGroup):
+    details = State()
 
 
 class CouponAdminForm(StatesGroup):
@@ -140,6 +153,22 @@ def _is_export_stock_action(text: str) -> bool:
 
 def _is_import_stock_url_action(text: str) -> bool:
     return _starts_with_any(text, ("Import Stock URL #",))
+
+
+def _is_auto_refill_action(text: str) -> bool:
+    return _starts_with_any(text, ("Auto Refill #",))
+
+
+def _is_auto_status_action(text: str) -> bool:
+    return _starts_with_any(text, ("Auto Status #",))
+
+
+def _is_stop_auto_action(text: str) -> bool:
+    return _starts_with_any(text, ("Stop Auto #",))
+
+
+def _is_reset_auto_action(text: str) -> bool:
+    return _starts_with_any(text, ("Reset Auto #",))
 
 
 def _is_exact_button(text: str, label: str) -> bool:
@@ -1370,6 +1399,108 @@ async def deposits_text(message: Message, session: AsyncSession, state: FSMConte
         await message.answer(text, reply_markup=deposit_review_reply_menu(first.id))
 
 
+def _auto_stock_status_text(source: object | None, current_stock: int, product_id: int) -> str:
+    if not source:
+        return (
+            "Auto Stock Status\n\n"
+            f"Product ID: #{product_id}\n"
+            f"Current Stock: {current_stock}\n"
+            "Status: Not configured\n\n"
+            "Use Auto Refill and send:\n"
+            "DropboxLink | 40000 | 20000"
+        )
+    status = "Active" if source.is_active else "Stopped"
+    last_run = source.last_run_at or "Never"
+    last_error = source.last_error or "None"
+    return (
+        "Auto Stock Status\n\n"
+        f"Product ID: #{product_id}\n"
+        f"Current Stock: {current_stock}\n"
+        f"Status: {status}\n"
+        f"Target Stock: {source.target_stock}\n"
+        f"Refill When Stock <= {source.refill_threshold}\n"
+        f"Next Source Line: {source.next_line_number}\n"
+        f"Last Added: {source.last_added_count}\n"
+        f"Last Run: {last_run}\n"
+        f"Last Error: {last_error}"
+    )
+
+
+@router.message(StateFilter("*"), F.text.func(_is_auto_refill_action))
+async def auto_refill_start(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Auto Refill #")
+    if not product_id:
+        await message.answer("Invalid product action.", reply_markup=admin_reply_menu())
+        return
+    await state.update_data(product_id=product_id)
+    await state.set_state(AutoStockForm.details)
+    await message.answer(
+        "Auto Stock Refill\n\n"
+        f"Product ID: #{product_id}\n\n"
+        "Send Dropbox/direct URL like this:\n\n"
+        "DropboxLink | 40000 | 20000\n\n"
+        "40000 = keep stock up to this number\n"
+        "20000 = refill when stock becomes this number or lower\n\n"
+        "You can also send only the link. Default: 40000 target, 20000 threshold."
+    )
+
+
+@router.message(StateFilter("*"), F.text.func(_is_auto_status_action))
+async def auto_refill_status(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Auto Status #")
+    if not product_id:
+        await message.answer("Invalid product action.", reply_markup=admin_reply_menu())
+        return
+    source = await get_auto_stock_source(session, product_id)
+    current_stock = await unsold_stock_count(session, product_id)
+    await message.answer(
+        _auto_stock_status_text(source, current_stock, product_id),
+        reply_markup=product_admin_actions_reply_menu(product_id, True),
+    )
+
+
+@router.message(StateFilter("*"), F.text.func(_is_stop_auto_action))
+async def auto_refill_stop(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Stop Auto #")
+    if not product_id:
+        await message.answer("Invalid product action.", reply_markup=admin_reply_menu())
+        return
+    stopped = await stop_auto_stock_source(session, product_id)
+    await message.answer(
+        "Auto stock refill stopped." if stopped else "Auto stock refill was not configured for this product.",
+        reply_markup=product_admin_actions_reply_menu(product_id, True),
+    )
+
+
+@router.message(StateFilter("*"), F.text.func(_is_reset_auto_action))
+async def auto_refill_reset(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Reset Auto #")
+    if not product_id:
+        await message.answer("Invalid product action.", reply_markup=admin_reply_menu())
+        return
+    reset = await reset_auto_stock_progress(session, product_id)
+    await message.answer(
+        "Auto stock progress reset. Next refill will start from line 1 again." if reset else "Auto stock refill was not configured for this product.",
+        reply_markup=product_admin_actions_reply_menu(product_id, True),
+    )
+
+
 @router.callback_query(F.data.startswith("admin_stock_for:"))
 async def add_stock_for_product(callback: CallbackQuery, state: FSMContext) -> None:
     if not is_admin(callback.from_user.id):
@@ -1504,6 +1635,69 @@ async def stock_payload(message: Message, state: FSMContext, session: AsyncSessi
     count = await add_stock(session, int(product_id), message.text.splitlines())
     await state.clear()
     await message.answer(f"Stock Added\n\nAdded Items: {count}", reply_markup=admin_reply_menu())
+
+
+@router.message(AutoStockForm.details)
+async def auto_refill_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text:
+        await message.answer("Please send the Dropbox/direct URL.")
+        return
+
+    data = await state.get_data()
+    product_id = int(data["product_id"])
+    parts = [part.strip() for part in message.text.split("|")]
+    url = parts[0]
+    if not url.startswith(("http://", "https://")):
+        await message.answer("Please send a valid http/https Dropbox or direct download URL.")
+        return
+    try:
+        target_stock = int(parts[1]) if len(parts) > 1 and parts[1] else DEFAULT_TARGET_STOCK
+        refill_threshold = int(parts[2]) if len(parts) > 2 and parts[2] else DEFAULT_REFILL_THRESHOLD
+    except ValueError:
+        await message.answer("Target and threshold must be whole numbers.\n\nExample:\nDropboxLink | 40000 | 20000")
+        return
+    if target_stock < 1000:
+        await message.answer("Target stock should be at least 1000.")
+        return
+    if refill_threshold >= target_stock:
+        await message.answer("Threshold must be smaller than target stock.\n\nExample:\nDropboxLink | 40000 | 20000")
+        return
+
+    source = await upsert_auto_stock_source(session, product_id, url, target_stock, refill_threshold)
+    await state.clear()
+    await log_admin_action(
+        session,
+        message.from_user.id,
+        "auto_stock_setup",
+        "product",
+        product_id,
+        details=f"target={target_stock}, threshold={refill_threshold}",
+    )
+    await message.answer(
+        "Auto refill saved.\n\n"
+        "Trying the first refill now. Large Dropbox files can take a few minutes."
+    )
+    try:
+        result = await refill_source(session, source.id)
+    except Exception as exc:
+        await message.answer(
+            f"Auto refill saved, but first refill failed.\n\nReason: {exc}",
+            reply_markup=product_admin_actions_reply_menu(product_id, True),
+        )
+        return
+    await message.answer(
+        "Auto Refill Ready\n\n"
+        f"Product ID: #{product_id}\n"
+        f"Added Now: {result.added_count}\n"
+        f"Current Stock: {result.current_stock}\n"
+        f"Target Stock: {result.target_stock}\n"
+        f"Refill When Stock <= {result.refill_threshold}\n"
+        f"Next Source Line: {result.next_line_number}\n\n"
+        "Bot will check automatically every few minutes.",
+        reply_markup=product_admin_actions_reply_menu(product_id, True),
+    )
 
 
 @router.message(StockUrlForm.url)

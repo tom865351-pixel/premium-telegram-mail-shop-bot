@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.database.base import Base
@@ -61,6 +61,26 @@ class StockItem(Base):
     sold_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     product: Mapped[Product] = relationship(back_populates="stock_items")
+
+
+class AutoStockSource(Base):
+    __tablename__ = "auto_stock_sources"
+    __table_args__ = (UniqueConstraint("product_id", name="uq_auto_stock_product"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    url: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    target_stock: Mapped[int] = mapped_column(Integer, default=40000)
+    refill_threshold: Mapped[int] = mapped_column(Integer, default=20000)
+    next_line_number: Mapped[int] = mapped_column(Integer, default=0)
+    last_added_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    product: Mapped[Product] = relationship()
 
 
 class Order(Base):

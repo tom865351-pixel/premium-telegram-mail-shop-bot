@@ -124,8 +124,13 @@ def deposit_review_reply_menu(deposit_id: int) -> ReplyKeyboardMarkup:
 
 def product_admin_actions_reply_menu(product_id: int, is_active: bool) -> ReplyKeyboardMarkup:
     label = "Disable" if is_active else "Enable"
+    auto_rows = [
+        [KeyboardButton(text=f"Auto Refill #{product_id}"), KeyboardButton(text=f"Auto Status #{product_id}")],
+        [KeyboardButton(text=f"Stop Auto #{product_id}"), KeyboardButton(text=f"Reset Auto #{product_id}")],
+    ]
     return ReplyKeyboardMarkup(
         keyboard=[
+            *auto_rows,
             [KeyboardButton(text=f"📥 Add Stock #{product_id}"), KeyboardButton(text=f"🔄 {label} Product #{product_id}")],
             [KeyboardButton(text=f"🌐 Import Stock URL #{product_id}"), KeyboardButton(text=f"📤 Export Stock #{product_id}")],
             [KeyboardButton(text=f"✏️ Edit Product #{product_id}"), KeyboardButton(text=f"🗑 Delete Product #{product_id}")],
