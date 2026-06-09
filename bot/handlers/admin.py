@@ -36,6 +36,7 @@ from bot.utils.formatting import money
 router = Router()
 
 SUPPORTED_STOCK_EXTENSIONS = (".xlsx", ".csv", ".txt")
+MAX_TELEGRAM_DOWNLOAD_BYTES = 20 * 1024 * 1024
 
 
 class ProductForm(StatesGroup):
@@ -1308,6 +1309,17 @@ async def _process_stock_document(message: Message, state: FSMContext, session: 
     if not file_name.lower().endswith(SUPPORTED_STOCK_EXTENSIONS):
         await message.answer("Unsupported file type. Please upload only .xlsx, .csv, or .txt stock files.")
         return
+    if document.file_size and document.file_size > MAX_TELEGRAM_DOWNLOAD_BYTES:
+        await message.answer(
+            "Stock file is too large for Telegram bot download.\n\n"
+            "Please split the stock into smaller files and upload again.\n\n"
+            "Best format:\n"
+            "email1@example.com|password1\n"
+            "email2@example.com|password2\n\n"
+            "Tip: .txt or .csv files are lighter than .xlsx.",
+            reply_markup=admin_reply_menu(),
+        )
+        return
 
     data = await state.get_data()
     product_id = data.get("product_id")
@@ -1322,7 +1334,18 @@ async def _process_stock_document(message: Message, state: FSMContext, session: 
         await message.bot.download(document, destination=buffer)
         lines = parse_stock_file(file_name, buffer.getvalue())
     except Exception as exc:
-        await message.answer(f"Could not read this stock file.\n\nReason: {exc}")
+        reason = str(exc)
+        if "file is too big" in reason.lower():
+            await message.answer(
+                "Stock file is too large for Telegram bot download.\n\n"
+                "Please split the stock into smaller files, or upload as a lighter .txt/.csv file.\n\n"
+                "Format:\n"
+                "email1@example.com|password1\n"
+                "email2@example.com|password2",
+                reply_markup=admin_reply_menu(),
+            )
+            return
+        await message.answer(f"Could not read this stock file.\n\nReason: {reason}")
         return
 
     if not lines:
