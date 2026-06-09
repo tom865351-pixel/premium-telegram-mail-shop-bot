@@ -127,7 +127,7 @@ def product_admin_actions_reply_menu(product_id: int, is_active: bool) -> ReplyK
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=f"📥 Add Stock #{product_id}"), KeyboardButton(text=f"🔄 {label} Product #{product_id}")],
-            [KeyboardButton(text=f"📤 Export Stock #{product_id}")],
+            [KeyboardButton(text=f"🌐 Import Stock URL #{product_id}"), KeyboardButton(text=f"📤 Export Stock #{product_id}")],
             [KeyboardButton(text=f"✏️ Edit Product #{product_id}"), KeyboardButton(text=f"🗑 Delete Product #{product_id}")],
             [KeyboardButton(text="📦 Products"), KeyboardButton(text="⚙️ Admin Panel")],
         ],

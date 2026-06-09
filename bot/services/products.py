@@ -93,6 +93,15 @@ async def add_stock(session: AsyncSession, product_id: int, lines: list[str]) ->
     return len(clean_lines)
 
 
+async def add_stock_batch(session: AsyncSession, product_id: int, lines: list[str]) -> int:
+    clean_lines = [line.strip() for line in lines if line.strip()]
+    if not clean_lines:
+        return 0
+    session.add_all([StockItem(product_id=product_id, payload=line) for line in clean_lines])
+    await session.commit()
+    return len(clean_lines)
+
+
 async def unsold_stock_count(session: AsyncSession, product_id: int) -> int:
     return int(
         await session.scalar(

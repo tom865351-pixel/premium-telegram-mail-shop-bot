@@ -2,6 +2,7 @@ import csv
 import re
 from io import BytesIO, StringIO
 
+import aiohttp
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -27,7 +28,7 @@ from bot.keyboards.admin import (
 from bot.services.coupons import create_coupon
 from bot.services.audit import log_admin_action
 from bot.services.deposits import all_deposits, deposited_today, pending_deposits, review_deposit
-from bot.services.products import add_stock, create_product, delete_product, list_all_products, search_products, toggle_product, unsold_stock_items, update_product
+from bot.services.products import add_stock, add_stock_batch, create_product, delete_product, list_all_products, search_products, toggle_product, unsold_stock_items, update_product
 from bot.services.stats import admin_stats
 from bot.services.orders import all_orders, get_order, order_count, refund_order, sales_report, total_spent
 from bot.services.users import adjust_user_balance, find_user, list_all_users, list_recent_users, set_user_banned, set_user_note, set_user_restricted
@@ -50,6 +51,10 @@ class ProductEditForm(StatesGroup):
 class StockForm(StatesGroup):
     product_id = State()
     payload = State()
+
+
+class StockUrlForm(StatesGroup):
+    url = State()
 
 
 class CouponAdminForm(StatesGroup):
@@ -126,6 +131,10 @@ def _is_add_stock_action(text: str) -> bool:
 
 def _is_export_stock_action(text: str) -> bool:
     return _starts_with_any(text, ("Export Stock #",))
+
+
+def _is_import_stock_url_action(text: str) -> bool:
+    return _starts_with_any(text, ("Import Stock URL #",))
 
 
 def _is_exact_button(text: str, label: str) -> bool:
@@ -356,6 +365,65 @@ def parse_stock_file(file_name: str, data: bytes) -> list[str]:
         return [line.strip() for line in text.splitlines() if line.strip()]
 
     raise ValueError("Unsupported file type.")
+
+
+def _normalize_stock_url(url: str) -> str:
+    cleaned = url.strip()
+    if "dropbox.com" in cleaned:
+        cleaned = cleaned.replace("?dl=0", "?dl=1")
+        if "?dl=" not in cleaned:
+            cleaned += ("&" if "?" in cleaned else "?") + "dl=1"
+    return cleaned
+
+
+def _stock_line_from_text(raw_line: str) -> str | None:
+    line = raw_line.strip()
+    if not line:
+        return None
+    if "|" in line:
+        return line
+    try:
+        row = next(csv.reader([line]))
+    except Exception:
+        return line
+    return _stock_line_from_cells(row) or line
+
+
+async def import_stock_from_url(
+    session: AsyncSession,
+    product_id: int,
+    url: str,
+    batch_size: int = 5000,
+) -> int:
+    total = 0
+    pending: list[str] = []
+    remainder = ""
+    timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=300)
+    async with aiohttp.ClientSession(timeout=timeout) as http_session:
+        async with http_session.get(_normalize_stock_url(url), allow_redirects=True) as response:
+            if response.status >= 400:
+                raise ValueError(f"Download failed with HTTP {response.status}.")
+            async for chunk in response.content.iter_chunked(1024 * 256):
+                text = remainder + chunk.decode("utf-8-sig", errors="ignore")
+                lines = text.splitlines()
+                if text and not text.endswith(("\n", "\r")):
+                    remainder = lines.pop() if lines else text
+                else:
+                    remainder = ""
+                for raw_line in lines:
+                    line = _stock_line_from_text(raw_line)
+                    if line:
+                        pending.append(line)
+                    if len(pending) >= batch_size:
+                        total += await add_stock_batch(session, product_id, pending)
+                        pending = []
+            if remainder:
+                line = _stock_line_from_text(remainder)
+                if line:
+                    pending.append(line)
+            if pending:
+                total += await add_stock_batch(session, product_id, pending)
+    return total
 
 
 def _xlsx_file(filename: str, rows: list[list[object]], sheet_name: str = "Export") -> BufferedInputFile:
@@ -1234,6 +1302,29 @@ async def export_stock_text(message: Message, state: FSMContext, session: AsyncS
     )
 
 
+@router.message(StateFilter("*"), F.text.func(_is_import_stock_url_action))
+async def import_stock_url_start(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = _id_from_hash_button(message.text, "Import Stock URL #")
+    if not product_id:
+        await message.answer("Invalid product action.", reply_markup=admin_reply_menu())
+        return
+    await state.update_data(product_id=product_id)
+    await state.set_state(StockUrlForm.url)
+    await message.answer(
+        f"Import Stock URL\n\n"
+        f"Product ID: #{product_id}\n\n"
+        "Send a direct .txt or .csv download URL.\n\n"
+        "Supported format:\n"
+        "email1@example.com|password1\n"
+        "email2@example.com|password2\n\n"
+        "Dropbox tip: share link should end with dl=1."
+    )
+
+
 @router.message(StateFilter("*"), F.text.in_({"Deposits", "DEPOSITS", "💳 Deposits"}))
 async def deposits_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
@@ -1385,6 +1476,33 @@ async def stock_payload(message: Message, state: FSMContext, session: AsyncSessi
     count = await add_stock(session, int(product_id), message.text.splitlines())
     await state.clear()
     await message.answer(f"Stock Added\n\nAdded Items: {count}", reply_markup=admin_reply_menu())
+
+
+@router.message(StockUrlForm.url)
+async def stock_url_import_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    url = (message.text or "").strip()
+    if not url.startswith(("http://", "https://")):
+        await message.answer("Please send a valid http/https download URL.")
+        return
+    data = await state.get_data()
+    product_id = int(data["product_id"])
+    await message.answer(
+        "Stock URL import started.\n\n"
+        "Please wait. Large files can take a while. Do not send another import for this product until it finishes."
+    )
+    try:
+        count = await import_stock_from_url(session, product_id, url)
+    except Exception as exc:
+        await message.answer(f"Stock URL import failed.\n\nReason: {exc}", reply_markup=product_admin_actions_reply_menu(product_id, True))
+        return
+    await state.clear()
+    await log_admin_action(session, message.from_user.id, "import_stock_url", "product", product_id, details=f"items={count}")
+    await message.answer(
+        f"Stock URL Import Completed\n\nProduct ID: #{product_id}\nAdded Items: {count}",
+        reply_markup=product_admin_actions_reply_menu(product_id, True),
+    )
 
 
 @router.message(StateFilter("*"), F.document)
