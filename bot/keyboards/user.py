@@ -38,6 +38,8 @@ def product_buy_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="🛒 Single"), KeyboardButton(text="📦 Bulk"), KeyboardButton(text="🏠 Menu")],
     ]
+    if is_admin:
+        rows.append([KeyboardButton(text="⚙️ Admin Panel")])
     return ReplyKeyboardMarkup(
         keyboard=rows,
         resize_keyboard=True,
