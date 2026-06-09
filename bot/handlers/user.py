@@ -27,7 +27,10 @@ router = Router()
 
 RESERVED_REPLY_TEXTS = {
     "🏠 Main Menu",
+    "🏠 Menu",
     "MAIN MENU",
+    "MENU",
+    "Menu",
     "Main Menu",
     "🛍 Shop Now",
     "🛍 Shop",
@@ -147,7 +150,10 @@ DEPOSIT_METHOD_LABELS = {
 
 MENU_ALIASES = {
     "🏠 Main Menu": "Main Menu",
+    "🏠 Menu": "Main Menu",
     "MAIN MENU": "Main Menu",
+    "MENU": "Main Menu",
+    "Menu": "Main Menu",
     "🛍 Shop Now": "Shop",
     "🛍 Shop": "Shop",
     "MAIL SHOP": "Shop",
@@ -192,6 +198,7 @@ MENU_ALIASES = {
 ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats", "Members"}
 GLOBAL_MENU_TEXTS = {
     "Main Menu",
+    "Menu",
     "Shop",
     "Deposit",
     "Sell",
@@ -204,6 +211,7 @@ GLOBAL_MENU_TEXTS = {
     "Support",
     "Admin Panel",
     "MAIN MENU",
+    "MENU",
     "MAIL SHOP",
     "ADD BALANCE",
     "MY PROFILE",
@@ -213,6 +221,7 @@ GLOBAL_MENU_TEXTS = {
     "SUPPORT",
     "ADMIN PANEL",
     "🏠 Main Menu",
+    "🏠 Menu",
     "🛍 Shop Now",
     "🛍 Shop",
     "💼 Sell",

@@ -36,11 +36,7 @@ def products_reply_menu(products: list[tuple[object, int]], is_admin: bool = Fal
 
 def product_buy_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton(text="🛒 Single"), KeyboardButton(text="📦 Bulk")],
-        [KeyboardButton(text="🛍 Shop"), KeyboardButton(text="💼 Sell"), KeyboardButton(text="💳 Top Up")],
-        [KeyboardButton(text="🤖 AI"), KeyboardButton(text="👤 Profile"), KeyboardButton(text="📦 Orders")],
-        [KeyboardButton(text="🏷 Coupon"), KeyboardButton(text="🎁 Refer"), KeyboardButton(text="🧾 Status")],
-        [KeyboardButton(text="☎️ Support")],
+        [KeyboardButton(text="🛒 Single"), KeyboardButton(text="📦 Bulk"), KeyboardButton(text="🏠 Menu")],
     ]
     return ReplyKeyboardMarkup(
         keyboard=rows,
