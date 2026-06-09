@@ -10,15 +10,16 @@ from openpyxl import Workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
-from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu
+from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu, replacement_review_reply_menu
 from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
 from bot.services.coupons import redeem_coupon
-from bot.database.models import DepositStatus
+from bot.database.models import DepositStatus, Order
 from bot.services.ai import ask_gemini_agent
 from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, recent_deposits, txid_exists
 from bot.services.ocr import analyze_payment_screenshot
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
 from bot.services.products import list_active_products, unsold_stock_count
+from bot.services.replacements import create_replacement_request, recent_replacements
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.utils.formatting import clean_support_username, money
 from bot.utils.ui import panel
@@ -96,6 +97,27 @@ RESERVED_REPLY_TEXTS = {
     "🧾 Status",
     "Status",
     "Deposit Status",
+    "🔁 Replace",
+    "Replace",
+    "REPLACE",
+    "Cancel",
+    "CANCEL",
+    "🛍 Shop",
+    "💼 Sell",
+    "💳 Top Up",
+    "🤖 AI",
+    "👤 Profile",
+    "📦 Orders",
+    "🏷 Coupon",
+    "🎁 Refer",
+    "🧾 Status",
+    "☎️ Support",
+    "⚙️ Admin Panel",
+    "🟡 Binance",
+    "🛒 Single",
+    "📦 Bulk",
+    "🏠 Menu",
+    "🏠 Main Menu",
     "🟡 Binance",
     "Binance",
     "💵 USDT TRC20",
@@ -124,6 +146,7 @@ RESERVED_REPLY_TEXTS = {
 
 DEPOSIT_METHOD_TEXTS = {
     "🟡 Binance": "binance",
+    "🟡 Binance": "binance",
     "Binance": "binance",
     "💵 USDT TRC20": "usdt_trc20",
     "TRC20": "usdt_trc20",
@@ -149,6 +172,23 @@ DEPOSIT_METHOD_LABELS = {
 }
 
 MENU_ALIASES = {
+    "🏠 Main Menu": "Main Menu",
+    "🏠 Menu": "Main Menu",
+    "🛍 Shop": "Shop",
+    "💼 Sell": "Sell",
+    "🤖 AI": "AI",
+    "💳 Top Up": "Deposit",
+    "👤 Profile": "Profile",
+    "📦 Orders": "Orders",
+    "🧾 Status": "Deposit Status",
+    "🎁 Refer": "Referral",
+    "🏷 Coupon": "Coupon",
+    "🔁 Replace": "Replace",
+    "REPLACE": "Replace",
+    "Cancel": "Cancel",
+    "CANCEL": "Cancel",
+    "☎️ Support": "Support",
+    "⚙️ Admin Panel": "Admin Panel",
     "🏠 Main Menu": "Main Menu",
     "🏠 Menu": "Main Menu",
     "MAIN MENU": "Main Menu",
@@ -197,6 +237,21 @@ MENU_ALIASES = {
 }
 ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats", "Members"}
 GLOBAL_MENU_TEXTS = {
+    "🏠 Main Menu",
+    "🏠 Menu",
+    "🛍 Shop",
+    "💼 Sell",
+    "🤖 AI",
+    "💳 Top Up",
+    "👤 Profile",
+    "📦 Orders",
+    "🧾 Status",
+    "🎁 Refer",
+    "🏷 Coupon",
+    "🔁 Replace",
+    "Cancel",
+    "☎️ Support",
+    "⚙️ Admin Panel",
     "Main Menu",
     "Menu",
     "Shop",
@@ -286,6 +341,11 @@ class BulkBuyForm(StatesGroup):
     quantity = State()
 
 
+class ReplaceForm(StatesGroup):
+    details = State()
+    proof = State()
+
+
 def build_bulk_delivery_file(stock_items: list[object]) -> BufferedInputFile:
     workbook = Workbook()
     worksheet = workbook.active
@@ -345,8 +405,75 @@ def deposit_admin_text(
     )
 
 
+def parse_replace_details(text: str | None) -> tuple[int | None, int, str] | None:
+    if not text:
+        return None
+    parts = [part.strip() for part in text.split("|", 2)]
+    if len(parts) < 3:
+        return None
+    if parts[0] in {"-", "0", "none", "None"}:
+        order_id = None
+    else:
+        try:
+            order_id = int(parts[0].lstrip("#"))
+        except ValueError:
+            return None
+    try:
+        quantity = int(parts[1])
+    except ValueError:
+        return None
+    if quantity < 1 or not parts[2]:
+        return None
+    return order_id, quantity, parts[2]
+
+
+def replacement_admin_text(request: object, user: object) -> str:
+    username = f"@{user.username}" if getattr(user, "username", None) else "No username"
+    return (
+        "Replacement Request\n\n"
+        f"Request ID: #{request.id}\n"
+        f"User: {user.first_name or 'Unknown'} ({username})\n"
+        f"Telegram ID: <code>{user.telegram_id}</code>\n"
+        f"Order ID: #{request.order_id or 'Not given'}\n"
+        f"Quantity: {request.quantity}\n"
+        f"Status: {request.status.value}\n\n"
+        f"Message:\n{request.message}\n\n"
+        f"Proof: {'Attached/file below' if request.proof_file_id else 'Text attached'}"
+    )
+
+
+async def notify_replacement_admins(message: Message, request: object, user: object) -> None:
+    text = replacement_admin_text(request, user)
+    for admin_id in get_settings().admin_ids:
+        try:
+            if request.proof_file_id and request.proof_file_name:
+                await message.bot.send_document(admin_id, request.proof_file_id, caption=f"Replacement proof for request #{request.id}")
+            elif request.proof_file_id:
+                await message.bot.send_photo(admin_id, request.proof_file_id, caption=f"Replacement proof for request #{request.id}")
+            elif request.proof_text:
+                await message.bot.send_message(admin_id, f"Replacement proof text #{request.id}:\n\n{request.proof_text[:3500]}")
+            await message.bot.send_message(admin_id, text, reply_markup=replacement_review_reply_menu(request.id))
+        except Exception:
+            pass
+
+
 def clean_button_text(text: str | None) -> str:
     prefixes = (
+        "🛒 ",
+        "🛍 ",
+        "💼 ",
+        "💳 ",
+        "🤖 ",
+        "👤 ",
+        "📦 ",
+        "🔁 ",
+        "🏷 ",
+        "🎁 ",
+        "🧾 ",
+        "☎️ ",
+        "⚙️ ",
+        "🏠 ",
+        "🟡 ",
         "🛒 ",
         "📦 ",
         "🛍 ",
@@ -698,6 +825,17 @@ async def send_menu(message: Message, session: AsyncSession, referral_code: str 
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
 
 
+async def send_deposit_for_insufficient_balance(message: Message, needed_amount: float, current_balance: float) -> None:
+    await message.answer(
+        "Insufficient Balance\n\n"
+        f"Required: {money(needed_amount)}\n"
+        f"Your Balance: {money(current_balance)}\n"
+        f"Need More: {money(max(needed_amount - current_balance, 0))}\n\n"
+        "Please top up first. Select a payment method below.",
+        reply_markup=deposit_methods_reply_menu(),
+    )
+
+
 @router.message(Command("start"))
 async def start(message: Message, command: CommandObject, session: AsyncSession) -> None:
     await send_menu(message, session, command.args)
@@ -729,6 +867,13 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
     if selected == "Main Menu":
         await message.answer(
             panel("MAIN MENU", f"Balance: {money(user.balance)}", "", "Select an option from the keyboard."),
+            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+        )
+        return
+
+    if selected == "Cancel":
+        await message.answer(
+            "Current task cancelled.\n\nMain menu is ready.",
             reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
         )
         return
@@ -770,6 +915,18 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
             "Product type | Quantity | Expected price | Details\n\n"
             "Example:\n"
             "Gmail fresh | 20 | 10 TK each | old stock, recovery attached"
+        )
+        return
+
+    if selected == "Replace":
+        await state.set_state(ReplaceForm.details)
+        await message.answer(
+            "Replace Request\n\n"
+            "Send details in this format:\n\n"
+            "Order ID | Quantity | Problem message\n\n"
+            "Example:\n"
+            "12 | 5 | 5 mail login problem\n\n"
+            "After this, send problem mail list as text or upload .txt/.csv/.xlsx/photo.",
         )
         return
 
@@ -970,6 +1127,19 @@ async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_or_create_user(session, callback.from_user)
     ok, message, stock_item = await purchase_product(session, user, product_id)
     if not ok:
+        if message.startswith("Insufficient balance"):
+            product_rows = await list_active_products(session)
+            product_row = next((row for row in product_rows if row[0].id == product_id), None)
+            needed = float(product_row[0].price) if product_row else 0.0
+            await callback.message.answer(
+                "Insufficient Balance\n\n"
+                f"Required: {money(needed)}\n"
+                f"Your Balance: {money(user.balance)}\n\n"
+                "Please top up first. Select a payment method below.",
+                reply_markup=deposit_methods_reply_menu(),
+            )
+            await callback.answer()
+            return
         await callback.answer(message, show_alert=True)
         return
 
@@ -999,9 +1169,14 @@ async def buy_product_text(message: Message, state: FSMContext, session: AsyncSe
     product_name = product_row[0].name if product_row else f"#{product_id}"
     ok, text, stock_item = await purchase_product(session, user, int(product_id))
     if not ok:
+        if text.startswith("Insufficient balance") and product_row:
+            await state.clear()
+            await send_deposit_for_insufficient_balance(message, float(product_row[0].price), float(user.balance))
+            return
         await message.answer(f"Purchase failed\n\n{text}", reply_markup=product_buy_reply_menu(message.from_user.id in get_settings().admin_ids))
         return
 
+    await state.clear()
     await message.answer(
         "Order Invoice\n\n"
         f"Order ID: #{stock_item.sold_order_id}\n"
@@ -1013,6 +1188,11 @@ async def buy_product_text(message: Message, state: FSMContext, session: AsyncSe
         reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
     )
     await notify_low_stock_if_needed(message, session, int(product_id), product_name)
+
+
+@router.message(StateFilter("*"), F.text == "🛒 Single")
+async def buy_product_text_current_keyboard(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await buy_product_text(message, state, session)
 
 
 @router.callback_query(F.data.startswith("bulk_buy:"))
@@ -1036,6 +1216,11 @@ async def bulk_buy_start_text(message: Message, state: FSMContext) -> None:
     await message.answer("Enter bulk quantity.\n\nMinimum quantity: 2")
 
 
+@router.message(StateFilter("*"), F.text == "📦 Bulk")
+async def bulk_buy_start_text_current_keyboard(message: Message, state: FSMContext) -> None:
+    await bulk_buy_start_text(message, state)
+
+
 @router.message(BulkBuyForm.quantity)
 async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSession) -> None:
     try:
@@ -1051,6 +1236,11 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
     product_name = product_row[0].name if product_row else f"#{data['product_id']}"
     ok, text, stock_items = await purchase_product_bulk(session, user, int(data["product_id"]), quantity)
     if not ok:
+        if text.startswith("Insufficient balance") and product_row:
+            total_price = round(float(product_row[0].price) * quantity, 2)
+            await state.clear()
+            await send_deposit_for_insufficient_balance(message, total_price, float(user.balance))
+            return
         await message.answer(text)
         return
 
@@ -1113,6 +1303,107 @@ async def deposit_status_text(message: Message, session: AsyncSession, state: FS
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
 
 
+@router.message(ReplaceForm.details)
+async def replace_details(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    user = await get_or_create_user(session, message.from_user)
+    block_text = account_block_text(user, "request replacement")
+    if block_text:
+        await state.clear()
+        await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        return
+    parsed = parse_replace_details(message.text)
+    if not parsed:
+        await message.answer(
+            "Invalid format.\n\n"
+            "Use:\n"
+            "Order ID | Quantity | Problem message\n\n"
+            "Example:\n"
+            "12 | 5 | 5 mail login problem\n\n"
+            "Send Cancel to stop."
+        )
+        return
+    order_id, quantity, problem = parsed
+    if order_id:
+        order = await session.get(Order, order_id)
+        if not order or order.user_id != user.id:
+            await message.answer("Order not found for your account. Please check the order ID or send 0 if you do not know it.")
+            return
+    await state.update_data(order_id=order_id, quantity=quantity, problem=problem)
+    await state.set_state(ReplaceForm.proof)
+    await message.answer(
+        "Now send the problem accounts.\n\n"
+        "You can send:\n"
+        "- text list\n"
+        "- .txt / .csv / .xlsx file\n"
+        "- photo/screenshot\n\n"
+        "Admin will check and approve the replacement/refund."
+    )
+
+
+async def _create_replace_from_proof(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    proof_text: str | None = None,
+    proof_file_id: str | None = None,
+    proof_file_name: str | None = None,
+) -> None:
+    data = await state.get_data()
+    if not {"quantity", "problem"}.issubset(data):
+        await state.clear()
+        await message.answer(
+            "Replacement session expired. Please start again from Replace.",
+            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        )
+        return
+    user = await get_or_create_user(session, message.from_user)
+    request = await create_replacement_request(
+        session=session,
+        user_id=user.id,
+        order_id=data.get("order_id"),
+        quantity=int(data["quantity"]),
+        message=str(data["problem"]),
+        proof_text=proof_text,
+        proof_file_id=proof_file_id,
+        proof_file_name=proof_file_name,
+    )
+    await state.clear()
+    await notify_replacement_admins(message, request, user)
+    await message.answer(
+        "Replace Request Submitted\n\n"
+        f"Request ID: #{request.id}\n"
+        f"Order ID: #{request.order_id or 'Not given'}\n"
+        f"Quantity: {request.quantity}\n\n"
+        "Admin will check your proof. If approved, the replacement amount will be added to your balance.",
+        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+    )
+
+
+@router.message(ReplaceForm.proof, F.document)
+async def replace_proof_document(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    document = message.document
+    await _create_replace_from_proof(
+        message,
+        state,
+        session,
+        proof_file_id=document.file_id,
+        proof_file_name=document.file_name or "replacement_proof",
+    )
+
+
+@router.message(ReplaceForm.proof, F.photo)
+async def replace_proof_photo(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await _create_replace_from_proof(message, state, session, proof_file_id=message.photo[-1].file_id)
+
+
+@router.message(ReplaceForm.proof)
+async def replace_proof_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not message.text:
+        await message.answer("Please send text, photo, or a .txt/.csv/.xlsx file.")
+        return
+    await _create_replace_from_proof(message, state, session, proof_text=message.text)
+
+
 @router.callback_query(F.data == "deposit")
 async def deposit(callback: CallbackQuery) -> None:
     await callback.message.edit_text("Deposit Funds\n\nSelect your preferred payment method.")
@@ -1151,6 +1442,12 @@ async def deposit_method_text(message: Message, state: FSMContext, session: Asyn
         f"Payment Method: {DEPOSIT_METHOD_LABELS[method]}\n\n"
         "Enter the amount you want to deposit."
     )
+
+
+@router.message(StateFilter("*"), F.text.in_(DEPOSIT_METHOD_TEXTS.keys()))
+async def deposit_method_text_interrupt(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    await deposit_method_text(message, state, session)
 
 
 @router.message(DepositForm.amount)

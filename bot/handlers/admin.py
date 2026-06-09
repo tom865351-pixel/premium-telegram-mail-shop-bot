@@ -24,6 +24,7 @@ from bot.keyboards.admin import (
     paged_reply_menu,
     product_admin_actions_reply_menu,
     refund_confirm_reply_menu,
+    replacement_review_reply_menu,
 )
 from bot.services.coupons import create_coupon
 from bot.services.audit import log_admin_action
@@ -40,6 +41,7 @@ from bot.services.auto_stock import (
 )
 from bot.services.stats import admin_stats
 from bot.services.orders import all_orders, get_order, order_count, refund_order, sales_report, total_spent
+from bot.services.replacements import pending_replacements, review_replacement
 from bot.services.users import adjust_user_balance, find_user, list_all_users, list_recent_users, set_user_banned, set_user_note, set_user_restricted
 from bot.utils.formatting import money
 
@@ -203,6 +205,14 @@ def _is_deposit_approve(text: str) -> bool:
     return _starts_with_any(text, ("Approve Deposit #",))
 
 
+def _is_replacement_review(text: str) -> bool:
+    return _starts_with_any(text, ("Approve Replace #", "Reject Replace #"))
+
+
+def _is_replacement_approve(text: str) -> bool:
+    return _starts_with_any(text, ("Approve Replace #",))
+
+
 def _is_member_action(text: str) -> bool:
     return _starts_with_any(
         text,
@@ -359,6 +369,46 @@ async def _send_next_deposit_after_review(message: Message, session: AsyncSessio
     if getattr(first, "proof_file_id", None):
         await message.answer_photo(first.proof_file_id, caption=f"Payment screenshot for deposit #{first.id}")
     await message.answer(text, reply_markup=deposit_review_reply_menu(first.id))
+
+
+async def _replacement_details_text(session: AsyncSession, request: object, queue_size: int | None = None) -> str:
+    from bot.database.models import User
+
+    user = await session.get(User, request.user_id)
+    queue_line = f"Queue: {queue_size} pending\n" if queue_size is not None else ""
+    return (
+        "Replacement Review\n\n"
+        f"{queue_line}"
+        f"Request ID: #{request.id}\n"
+        f"User: {user.first_name if user else 'Unknown'}\n"
+        f"Username: @{user.username if user and user.username else 'not_available'}\n"
+        f"Telegram ID: <code>{user.telegram_id if user else 'unknown'}</code>\n"
+        f"Order ID: #{request.order_id or 'Not given'}\n"
+        f"Quantity: {request.quantity}\n"
+        f"Status: {request.status.value}\n"
+        f"Submitted: {request.created_at:%Y-%m-%d %H:%M}\n\n"
+        f"Message:\n{request.message}\n\n"
+        f"Proof: {'File/photo attached' if request.proof_file_id else 'Text proof'}"
+    )
+
+
+async def _send_next_replacement_after_review(message: Message, session: AsyncSession, request: object) -> None:
+    await message.answer(
+        f"Replacement Reviewed\n\nRequest ID: #{request.id}\nStatus: {request.status.value}\nRefund: {money(request.refund_amount)}"
+    )
+    rows = await pending_replacements(session)
+    if not rows:
+        await message.answer("Replacements\n\nNo pending replacement requests.", reply_markup=admin_reply_menu())
+        return
+    first = rows[0]
+    text = await _replacement_details_text(session, first, len(rows))
+    if getattr(first, "proof_file_id", None) and getattr(first, "proof_file_name", None):
+        await message.answer_document(first.proof_file_id, caption=f"Replacement proof for request #{first.id}")
+    elif getattr(first, "proof_file_id", None):
+        await message.answer_photo(first.proof_file_id, caption=f"Replacement proof for request #{first.id}")
+    elif getattr(first, "proof_text", None):
+        await message.answer(f"Proof text #{first.id}:\n\n{first.proof_text[:3500]}")
+    await message.answer(text, reply_markup=replacement_review_reply_menu(first.id))
 
 
 def _looks_like_header(values: list[str]) -> bool:
@@ -1397,6 +1447,68 @@ async def deposits_text(message: Message, session: AsyncSession, state: FSMConte
         if getattr(first, "proof_file_id", None):
             await message.answer_photo(first.proof_file_id, caption=f"Payment screenshot for deposit #{first.id}")
         await message.answer(text, reply_markup=deposit_review_reply_menu(first.id))
+
+
+@router.message(StateFilter("*"), F.text.in_({"Replacements", "🔁 Replacements"}))
+async def replacements_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    rows = await pending_replacements(session)
+    if not rows:
+        await message.answer("Replacements\n\nNo pending replacement requests.", reply_markup=admin_reply_menu())
+        return
+    first = rows[0]
+    text = await _replacement_details_text(session, first, len(rows))
+    if getattr(first, "proof_file_id", None) and getattr(first, "proof_file_name", None):
+        await message.answer_document(first.proof_file_id, caption=f"Replacement proof for request #{first.id}")
+    elif getattr(first, "proof_file_id", None):
+        await message.answer_photo(first.proof_file_id, caption=f"Replacement proof for request #{first.id}")
+    elif getattr(first, "proof_text", None):
+        await message.answer(f"Proof text #{first.id}:\n\n{first.proof_text[:3500]}")
+    await message.answer(text, reply_markup=replacement_review_reply_menu(first.id))
+
+
+@router.message(StateFilter("*"), F.text.func(_is_replacement_review))
+async def replacement_review_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    approve = _is_replacement_approve(message.text)
+    request_id = _id_from_hash_button(message.text, "Approve Replace #" if approve else "Reject Replace #")
+    if not request_id:
+        await message.answer("Invalid replacement action.", reply_markup=admin_reply_menu())
+        return
+    ok, text, request = await review_replacement(session, request_id, approve=approve)
+    if not request:
+        await message.answer(text, reply_markup=admin_reply_menu())
+        return
+    await log_admin_action(
+        session,
+        message.from_user.id,
+        "approve_replace" if approve else "reject_replace",
+        "replacement",
+        request.id,
+        details=f"quantity={request.quantity}; refund={float(request.refund_amount)}",
+    )
+    from bot.database.models import User
+
+    user = await session.get(User, request.user_id)
+    if user:
+        try:
+            await message.bot.send_message(
+                user.telegram_id,
+                ("Replace Approved\n\n" if approve else "Replace Rejected\n\n")
+                + f"Request ID: #{request.id}\n"
+                + f"Quantity: {request.quantity}\n"
+                + f"Refund Added: {money(request.refund_amount)}\n\n"
+                + ("Your balance has been updated." if approve else "Admin checked your proof and rejected this request."),
+            )
+        except Exception:
+            pass
+    await _send_next_replacement_after_review(message, session, request)
 
 
 def _auto_stock_status_text(source: object | None, current_stock: int, product_id: int) -> str:

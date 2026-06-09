@@ -18,6 +18,12 @@ class DepositStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class ReplacementStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -115,6 +121,26 @@ class Deposit(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship()
+
+
+class ReplacementRequest(Base):
+    __tablename__ = "replacement_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True, index=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    message: Mapped[str] = mapped_column(Text, default="")
+    proof_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proof_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    proof_file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    refund_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    status: Mapped[ReplacementStatus] = mapped_column(Enum(ReplacementStatus), default=ReplacementStatus.PENDING, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship()
+    order: Mapped["Order | None"] = relationship()
 
 
 class Coupon(Base):

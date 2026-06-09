@@ -18,6 +18,7 @@ def members_reply_menu(users: list[object]) -> ReplyKeyboardMarkup:
 def admin_reply_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text="🔁 Replacements")],
             [KeyboardButton(text="📦 Products"), KeyboardButton(text="➕ Add Product")],
             [KeyboardButton(text="📥 Add Stock"), KeyboardButton(text="💳 Deposits")],
             [KeyboardButton(text="👥 Members"), KeyboardButton(text="📋 All Members")],
@@ -119,6 +120,18 @@ def deposit_review_reply_menu(deposit_id: int) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Review deposit request",
+    )
+
+
+def replacement_review_reply_menu(request_id: int) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=f"✅ Approve Replace #{request_id}"), KeyboardButton(text=f"❌ Reject Replace #{request_id}")],
+            [KeyboardButton(text="🔁 Replacements"), KeyboardButton(text="⚙️ Admin Panel")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Review replacement request",
     )
 
 
