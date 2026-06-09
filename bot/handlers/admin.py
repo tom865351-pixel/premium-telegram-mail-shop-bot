@@ -1294,20 +1294,31 @@ async def stock_payload_file(message: Message, state: FSMContext, session: Async
         await message.answer("Unsupported file type. Please upload only .xlsx, .csv, or .txt stock files.")
         return
 
+    data = await state.get_data()
+    product_id = data.get("product_id")
+    if not product_id:
+        await state.clear()
+        await message.answer("Product ID missing. Please open Products, select a product, then tap Add Stock again.", reply_markup=admin_reply_menu())
+        return
+
+    await message.answer(f"Processing stock file...\n\nFile: {file_name}")
     buffer = BytesIO()
-    await message.bot.download(document, destination=buffer)
     try:
+        await message.bot.download(document, destination=buffer)
         lines = parse_stock_file(file_name, buffer.getvalue())
-    except ValueError as exc:
-        await message.answer(str(exc))
+    except Exception as exc:
+        await message.answer(f"Could not read this stock file.\n\nReason: {exc}")
         return
 
     if not lines:
         await message.answer("No valid stock lines found in this file.")
         return
 
-    data = await state.get_data()
-    count = await add_stock(session, int(data["product_id"]), lines)
+    try:
+        count = await add_stock(session, int(product_id), lines)
+    except Exception as exc:
+        await message.answer(f"Stock upload failed while saving to database.\n\nReason: {exc}")
+        return
     await state.clear()
     await message.answer(
         f"Stock Uploaded\n\nFile: {file_name}\nAdded Items: {count}",
@@ -1323,9 +1334,25 @@ async def stock_payload(message: Message, state: FSMContext, session: AsyncSessi
         await message.answer("Send stock text or upload a .xlsx/.csv/.txt file.")
         return
     data = await state.get_data()
-    count = await add_stock(session, int(data["product_id"]), message.text.splitlines())
+    product_id = data.get("product_id")
+    if not product_id:
+        await state.clear()
+        await message.answer("Product ID missing. Please open Products, select a product, then tap Add Stock again.", reply_markup=admin_reply_menu())
+        return
+    count = await add_stock(session, int(product_id), message.text.splitlines())
     await state.clear()
     await message.answer(f"Stock Added\n\nAdded Items: {count}", reply_markup=admin_reply_menu())
+
+
+@router.message(StateFilter("*"), F.document)
+async def admin_document_without_stock_state(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer(
+        "File received, but no stock upload session is active.\n\n"
+        "Go to Products > select product > Add Stock, then upload the file again.",
+        reply_markup=admin_reply_menu(),
+    )
 
 
 @router.callback_query(F.data.startswith("admin_toggle_product:"))
