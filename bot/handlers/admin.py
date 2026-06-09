@@ -125,6 +125,11 @@ def _is_product_selection(text: str) -> bool:
     return _starts_with_any(text, ("Product #",))
 
 
+def _is_product_id_selection(text: str | None) -> bool:
+    normalized = _button_text(text)
+    return normalized.isdigit()
+
+
 def _is_add_stock_action(text: str) -> bool:
     return _starts_with_any(text, ("Add Stock #",))
 
@@ -1046,7 +1051,6 @@ async def admin_products_text(message: Message, session: AsyncSession, state: FS
             for product, stock in rows
         )
         await message.answer(text, reply_markup=admin_products_reply_menu(rows))
-        await message.answer("Navigate product pages.", reply_markup=paged_reply_menu("Products", 1))
 
 
 @router.message(StateFilter("*"), F.text.func(lambda text: _page_from_text(text, "Products") is not None))
@@ -1065,7 +1069,31 @@ async def products_page_text(message: Message, session: AsyncSession, state: FSM
         for product, stock in rows
     )
     await message.answer(text, reply_markup=admin_products_reply_menu(rows))
-    await message.answer("Navigate product pages.", reply_markup=paged_reply_menu("Products", page))
+
+
+@router.message(StateFilter(None), F.text.func(_is_product_id_selection))
+async def admin_product_id_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    product_id = int(_button_text(message.text))
+    rows = await list_all_products(session)
+    product_row = next((row for row in rows if row[0].id == product_id), None)
+    if not product_row:
+        await message.answer("Product not found.", reply_markup=admin_reply_menu())
+        return
+    product, stock_count = product_row
+    await message.answer(
+        f"Product Details\n\n"
+        f"Product ID: #{product.id}\n"
+        f"Name: {product.name}\n"
+        f"Price: {money(product.price)}\n"
+        f"Available Stock: {stock_count}\n"
+        f"Status: {'Active' if product.is_active else 'Disabled'}\n\n"
+        f"Description: {product.description or 'No description provided.'}",
+        reply_markup=product_admin_actions_reply_menu(product.id, product.is_active),
+    )
 
 
 @router.message(StateFilter("*"), F.text.func(_is_product_selection))
