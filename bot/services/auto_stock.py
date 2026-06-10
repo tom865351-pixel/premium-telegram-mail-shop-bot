@@ -45,12 +45,26 @@ def stock_line_from_text(raw_line: str) -> str | None:
     line = raw_line.strip().strip("\ufeff")
     if not line:
         return None
+    if "\t" in line:
+        cells = [cell.strip() for cell in line.split("\t") if cell.strip()]
+        lowered = {cell.lower() for cell in cells}
+        if {"no", "email/username", "password", "full account"} & lowered:
+            return None
+        if cells and cells[0].isdigit() and len(cells) >= 4 and "@" in cells[-1]:
+            return cells[-1]
+        if len(cells) >= 2:
+            return "|".join(cells)
     if "," in line and "|" not in line:
         try:
             row = next(csv.reader([line]))
         except csv.Error:
             row = []
         cells = [str(cell).strip() for cell in row if str(cell).strip()]
+        lowered = {cell.lower() for cell in cells}
+        if {"no", "email/username", "password", "full account"} & lowered:
+            return None
+        if cells and cells[0].isdigit() and len(cells) >= 4 and "@" in cells[-1]:
+            return cells[-1]
         if len(cells) >= 2:
             return "|".join(cells)
     return line

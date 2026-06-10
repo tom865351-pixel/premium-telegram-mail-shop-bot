@@ -356,7 +356,9 @@ def build_bulk_delivery_file(stock_items: list[object]) -> BufferedInputFile:
         payload = item.payload.strip()
         username, password = payload, ""
         if "|" in payload:
-            username, password = [part.strip() for part in payload.split("|", 1)]
+            parts = [part.strip() for part in payload.split("|")]
+            username = parts[0]
+            password = parts[1] if len(parts) > 1 else ""
         worksheet.append([index, username, password, payload])
 
     worksheet.column_dimensions["A"].width = 8

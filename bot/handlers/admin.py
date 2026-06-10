@@ -417,11 +417,22 @@ def _looks_like_header(values: list[str]) -> bool:
     return bool(lowered & header_words)
 
 
+def _looks_like_stock_line(value: str) -> bool:
+    clean = value.strip()
+    return "@" in clean and ("|" in clean or ":" in clean)
+
+
 def _stock_line_from_cells(cells: list[object]) -> str | None:
     values = [str(cell).strip() for cell in cells if cell is not None and str(cell).strip()]
     if not values or _looks_like_header(values):
         return None
+    if values[0].isdigit() and len(values) >= 4 and _looks_like_stock_line(values[-1]):
+        return values[-1]
+    if len(values) >= 4 and values[0].lower() in {"no", "#"} and _looks_like_stock_line(values[-1]):
+        return values[-1]
     if len(values) >= 2:
+        if len(values) > 2 and any("|" in value for value in values[1:]):
+            return "|".join(values)
         return f"{values[0]}|{values[1]}"
     return values[0]
 
@@ -446,7 +457,7 @@ def parse_stock_file(file_name: str, data: bytes) -> list[str]:
 
     if lowered.endswith(".txt"):
         text = data.decode("utf-8-sig", errors="ignore")
-        return [line.strip() for line in text.splitlines() if line.strip()]
+        return [line for raw_line in text.splitlines() if (line := _stock_line_from_text(raw_line))]
 
     raise ValueError("Unsupported file type.")
 
@@ -464,6 +475,9 @@ def _stock_line_from_text(raw_line: str) -> str | None:
     line = raw_line.strip()
     if not line:
         return None
+    if "\t" in line:
+        row = line.split("\t")
+        return _stock_line_from_cells(row)
     if "|" in line:
         return line
     try:
