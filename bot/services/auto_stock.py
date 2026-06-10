@@ -67,6 +67,10 @@ def stock_line_from_text(raw_line: str) -> str | None:
             return cells[-1]
         if len(cells) >= 2:
             return "|".join(cells)
+    if "|" not in line:
+        parts = line.split()
+        if len(parts) >= 2 and "@" in parts[0]:
+            return "|".join(parts[:3])
     return line
 
 

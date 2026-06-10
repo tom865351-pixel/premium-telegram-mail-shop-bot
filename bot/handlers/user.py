@@ -351,21 +351,54 @@ def build_bulk_delivery_file(stock_items: list[object]) -> BufferedInputFile:
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Accounts"
-    worksheet.append(["No", "Email/Username", "Password", "Full Account"])
+
+    rows: list[dict[str, str]] = []
+    has_token = False
+    has_recovery = False
 
     for index, item in enumerate(stock_items, start=1):
         payload = item.payload.strip()
         username, password = payload, ""
+        token, recovery = "", ""
         if "|" in payload:
             parts = [part.strip() for part in payload.split("|")]
             username = parts[0]
             password = parts[1] if len(parts) > 1 else ""
-        worksheet.append([index, username, password, payload])
+            if len(parts) > 2:
+                third_value = parts[2]
+                if third_value.startswith("M.") or len(third_value) > 80:
+                    token = third_value
+                    has_token = True
+                else:
+                    recovery = third_value
+                    has_recovery = True
+        rows.append(
+            {
+                "No": str(index),
+                "Email/Username": username,
+                "Password": password,
+                "Token": token,
+                "Recovery": recovery,
+                "Full Account": payload,
+            }
+        )
+
+    headers = ["No", "Email/Username", "Password"]
+    if has_token:
+        headers.append("Token")
+    if has_recovery:
+        headers.append("Recovery")
+    headers.append("Full Account")
+    worksheet.append(headers)
+
+    for row in rows:
+        worksheet.append([row.get(header, "") for header in headers])
 
     worksheet.column_dimensions["A"].width = 8
     worksheet.column_dimensions["B"].width = 36
     worksheet.column_dimensions["C"].width = 24
-    worksheet.column_dimensions["D"].width = 56
+    for column in ("D", "E", "F"):
+        worksheet.column_dimensions[column].width = 56
 
     output = BytesIO()
     workbook.save(output)

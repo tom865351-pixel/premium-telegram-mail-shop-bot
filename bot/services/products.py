@@ -7,6 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.models import Order, Product, StockItem
 
 
+def normalize_stock_line(line: str) -> str | None:
+    clean = line.strip()
+    if not clean:
+        return None
+    if "|" in clean:
+        return clean
+    parts = clean.split()
+    if len(parts) >= 2 and "@" in parts[0]:
+        return "|".join(parts[:3])
+    return clean
+
+
 async def list_active_products(session: AsyncSession) -> list[tuple[Product, int]]:
     result = await session.execute(
         select(Product, func.count(StockItem.id))
@@ -87,14 +99,14 @@ async def update_product(
 
 
 async def add_stock(session: AsyncSession, product_id: int, lines: list[str]) -> int:
-    clean_lines = [line.strip() for line in lines if line.strip()]
+    clean_lines = [clean for line in lines if (clean := normalize_stock_line(line))]
     session.add_all([StockItem(product_id=product_id, payload=line) for line in clean_lines])
     await session.commit()
     return len(clean_lines)
 
 
 async def add_stock_batch(session: AsyncSession, product_id: int, lines: list[str]) -> int:
-    clean_lines = [line.strip() for line in lines if line.strip()]
+    clean_lines = [clean for line in lines if (clean := normalize_stock_line(line))]
     if not clean_lines:
         return 0
     session.add_all([StockItem(product_id=product_id, payload=line) for line in clean_lines])

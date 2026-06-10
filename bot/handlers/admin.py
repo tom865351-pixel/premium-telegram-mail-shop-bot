@@ -480,6 +480,9 @@ def _stock_line_from_text(raw_line: str) -> str | None:
         return _stock_line_from_cells(row)
     if "|" in line:
         return line
+    space_parts = line.split()
+    if len(space_parts) >= 2 and "@" in space_parts[0]:
+        return "|".join(space_parts[:3])
     try:
         row = next(csv.reader([line]))
     except Exception:
