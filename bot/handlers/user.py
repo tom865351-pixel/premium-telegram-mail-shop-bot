@@ -650,19 +650,26 @@ def ai_reply_text(text: str) -> str:
     return f"🤖 AI Agent\n\n{clean}"
 
 
+async def dynamic_main_reply_menu(session: AsyncSession, telegram_id: int):
+    return main_reply_menu(
+        telegram_id in get_settings().admin_ids,
+        show_coupon=await coupons_enabled(session),
+    )
+
+
 async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMContext, user: object, text: str) -> bool:
     lowered = text.lower()
     is_admin = message.from_user.id in get_settings().admin_ids
 
     if any(word in lowered for word in ("menu", "main", "home", "start", "মেনু")):
         await state.clear()
-        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(is_admin))
+        await message.answer(await profile_text(session, user), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if any(word in lowered for word in ("shop", "product", "buy", "gmail", "mail", "stock", "দাম", "কিন")):
         product_rows = await list_active_products(session)
         if not product_rows:
-            await message.answer("No products are available right now.", reply_markup=main_reply_menu(is_admin))
+            await message.answer("No products are available right now.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         else:
             await message.answer(
                 panel("PRODUCT CATALOG", "Select a product from the keyboard below."),
@@ -678,17 +685,17 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
         return True
 
     if any(word in lowered for word in ("balance", "profile", "account", "amar taka", "ব্যালেন্স")):
-        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(is_admin))
+        await message.answer(await profile_text(session, user), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if any(word in lowered for word in ("order", "history", "purchase", "invoice", "অর্ডার")):
         response = await order_history_text(session, user.id)
-        await message.answer(response, reply_markup=main_reply_menu(is_admin))
+        await message.answer(response, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if any(word in lowered for word in ("status", "deposit status", "pending", "approved")):
         response = await pending_payment_status_text(session, user.id)
-        await message.answer(response, reply_markup=main_reply_menu(is_admin))
+        await message.answer(response, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if any(word in lowered for word in ("sell", "sale", "offer", "বিক্রি")):
@@ -702,7 +709,7 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
 
     if any(word in lowered for word in ("coupon", "code", "discount")):
         if not await coupons_enabled(session):
-            await message.answer("Coupon system is currently turned off.", reply_markup=main_reply_menu(is_admin))
+            await message.answer("Coupon system is currently turned off.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
             return True
         await state.set_state(CouponForm.code)
         await message.answer("Coupon Redemption\n\nSend your coupon code.")
@@ -715,13 +722,13 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
             "Referral Program\n\n"
             f"Commission: {get_settings().referral_commission_percent}%\n"
             f"Your link:\n{link}",
-            reply_markup=main_reply_menu(is_admin),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return True
 
     if any(word in lowered for word in ("support", "help", "admin", "contact", "সাপোর্ট")):
         username = clean_support_username(get_settings().support_username)
-        await message.answer(f"Support: @{username}", reply_markup=main_reply_menu(is_admin))
+        await message.answer(f"Support: @{username}", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     return False
@@ -743,19 +750,19 @@ async def execute_ai_action(
     if action == "answer":
         if keep_ai_chat:
             await state.set_state(AIHelpForm.message)
-        await message.answer(ai_reply_text(reply), reply_markup=main_reply_menu(is_admin))
+        await message.answer(ai_reply_text(reply), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if action == "menu":
         await state.clear()
-        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(is_admin))
+        await message.answer(await profile_text(session, user), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if action == "shop":
         await state.clear()
         product_rows = await list_active_products(session)
         if not product_rows:
-            await message.answer("No products are available right now.", reply_markup=main_reply_menu(is_admin))
+            await message.answer("No products are available right now.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         else:
             await message.answer(
                 ai_reply_text(reply or "Product list open kore dilam."),
@@ -776,7 +783,7 @@ async def execute_ai_action(
             await state.set_state(AIHelpForm.message)
         else:
             await state.clear()
-        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(is_admin))
+        await message.answer(await profile_text(session, user), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if action == "orders":
@@ -785,7 +792,7 @@ async def execute_ai_action(
         else:
             await state.clear()
         text = await order_history_text(session, user.id)
-        await message.answer(text, reply_markup=main_reply_menu(is_admin))
+        await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if action == "deposit_status":
@@ -794,7 +801,7 @@ async def execute_ai_action(
         else:
             await state.clear()
         text = await pending_payment_status_text(session, user.id)
-        await message.answer(text, reply_markup=main_reply_menu(is_admin))
+        await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if action == "sell":
@@ -812,7 +819,7 @@ async def execute_ai_action(
 
     if action == "coupon":
         if not await coupons_enabled(session):
-            await message.answer(ai_reply_text("Coupon system ekhon off ache."), reply_markup=main_reply_menu(is_admin))
+            await message.answer(ai_reply_text("Coupon system ekhon off ache."), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
             return True
         await state.set_state(CouponForm.code)
         await message.answer(ai_reply_text(reply or "Coupon code pathan."))
@@ -829,7 +836,7 @@ async def execute_ai_action(
             "Referral Program\n\n"
             f"Commission: {settings.referral_commission_percent}%\n"
             f"Your link:\n{link}",
-            reply_markup=main_reply_menu(is_admin),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return True
 
@@ -839,7 +846,7 @@ async def execute_ai_action(
         else:
             await state.clear()
         username = clean_support_username(settings.support_username)
-        await message.answer(ai_reply_text(reply or f"Support: @{username}"), reply_markup=main_reply_menu(is_admin))
+        await message.answer(ai_reply_text(reply or f"Support: @{username}"), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     return False
@@ -852,7 +859,7 @@ async def send_menu(message: Message, session: AsyncSession, referral_code: str 
         await message.answer("Your account is banned. Please contact support.")
         return
     text = await profile_text(session, user)
-    await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+    await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
 
 
 async def send_deposit_for_insufficient_balance(message: Message, needed_amount: float, current_balance: float) -> None:
@@ -929,20 +936,20 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
     if selected in restricted_actions:
         block_text = account_block_text(user, restricted_actions[selected])
         if block_text:
-            await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+            await message.answer(block_text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
             return
 
     if selected == "Main Menu":
         await message.answer(
             panel("MAIN MENU", f"Balance: {money(user.balance)}", "", "Select an option from the keyboard."),
-            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
 
     if selected == "Cancel":
         await message.answer(
             "Current task cancelled.\n\nMain menu is ready.",
-            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
 
@@ -951,7 +958,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         if not product_rows:
             await message.answer(
                 "No products are available right now. Please check again later.",
-                reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+                reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
             )
             return
         await message.answer(
@@ -1006,12 +1013,12 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         return
 
     if selected == "Profile":
-        await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        await message.answer(await profile_text(session, user), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
 
     if selected == "Orders":
         text = await order_history_text(session, user.id)
-        await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
 
     if selected == "History":
@@ -1037,7 +1044,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
 
     if selected == "Deposit Status":
         text = await pending_payment_status_text(session, user.id)
-        await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
 
     if selected == "Referral":
@@ -1047,13 +1054,13 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
             "Referral Program\n\n"
             f"Commission: {settings.referral_commission_percent}%\n"
             f"Your link:\n{link}",
-            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
 
     if selected == "Coupon":
         if not await coupons_enabled(session):
-            await message.answer("Coupon system is currently turned off.", reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+            await message.answer("Coupon system is currently turned off.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
             return
         await state.set_state(CouponForm.code)
         await message.answer("Coupon Redemption\n\nSend your coupon code.")
@@ -1061,12 +1068,12 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
 
     if selected == "Support":
         username = clean_support_username(settings.support_username)
-        await message.answer(f"Support: @{username}", reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        await message.answer(f"Support: @{username}", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
 
     if selected == "Admin Panel":
         if message.from_user.id not in settings.admin_ids:
-            await message.answer("You are not authorized.", reply_markup=main_reply_menu(False))
+            await message.answer("You are not authorized.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
             return
         await message.answer(
             "Admin Panel\n\nManage products, stock, deposits, coupons, and store statistics.",
@@ -1086,7 +1093,7 @@ async def menu(callback: CallbackQuery, session: AsyncSession, state: FSMContext
         f"Balance: {money(user.balance)}\n"
         "Select an option from the keyboard.",
     )
-    await callback.message.answer("Menu updated.", reply_markup=main_reply_menu(callback.from_user.id in settings.admin_ids))
+    await callback.message.answer("Menu updated.", reply_markup=await dynamic_main_reply_menu(session, callback.from_user.id))
     await callback.answer()
 
 
@@ -1097,7 +1104,7 @@ async def menu_text(message: Message, session: AsyncSession, state: FSMContext) 
     user = await get_or_create_user(session, message.from_user)
     await message.answer(
         f"Main Menu\n\nBalance: {money(user.balance)}",
-        reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
     )
 
 
@@ -1105,14 +1112,14 @@ async def menu_text(message: Message, session: AsyncSession, state: FSMContext) 
 async def dashboard(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_or_create_user(session, callback.from_user)
     await callback.message.edit_text(await profile_text(session, user))
-    await callback.message.answer("Menu", reply_markup=main_reply_menu(callback.from_user.id in get_settings().admin_ids))
+    await callback.message.answer("Menu", reply_markup=await dynamic_main_reply_menu(session, callback.from_user.id))
     await callback.answer()
 
 
 @router.message(StateFilter(None), F.text == "Profile")
 async def dashboard_text(message: Message, session: AsyncSession) -> None:
     user = await get_or_create_user(session, message.from_user)
-    await message.answer(await profile_text(session, user), reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+    await message.answer(await profile_text(session, user), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
 
 
 @router.callback_query(F.data == "products")
@@ -1120,7 +1127,7 @@ async def products(callback: CallbackQuery, session: AsyncSession) -> None:
     product_rows = await list_active_products(session)
     if not product_rows:
         await callback.message.edit_text("No products are available right now.")
-        await callback.message.answer("Menu", reply_markup=main_reply_menu(callback.from_user.id in get_settings().admin_ids))
+        await callback.message.answer("Menu", reply_markup=await dynamic_main_reply_menu(session, callback.from_user.id))
     else:
         await callback.message.answer(
             "Product Catalog\n\nSelect a product from the keyboard below.",
@@ -1136,7 +1143,7 @@ async def products_text(message: Message, session: AsyncSession) -> None:
     if not product_rows:
         await message.answer(
             "No products are available right now. Please check again later.",
-            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
     await message.answer(
@@ -1179,7 +1186,7 @@ async def send_product_detail_message(
     user = await get_or_create_user(session, message.from_user)
     block_text = account_block_text(user, "shop")
     if block_text:
-        await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        await message.answer(block_text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     product_name = clean_button_text(product_name)
@@ -1239,7 +1246,7 @@ async def buy_product_text(message: Message, state: FSMContext, session: AsyncSe
     data = await state.get_data()
     product_id = data.get("selected_product_id")
     if not product_id:
-        await message.answer("Please select a product first.", reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        await message.answer("Please select a product first.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
 
     user = await get_or_create_user(session, message.from_user)
@@ -1263,7 +1270,7 @@ async def buy_product_text(message: Message, state: FSMContext, session: AsyncSe
         f"💰 Cost: {money(product_row[0].price) if product_row else 'N/A'}\n\n"
         "Delivered Account:\n"
         f"<code>{stock_item.payload}</code>",
-        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
     )
     await notify_low_stock_if_needed(message, session, int(product_id), product_name)
 
@@ -1288,11 +1295,11 @@ async def bulk_buy_start(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(StateFilter(None), F.text.in_({"Bulk", "Bulk Buy", "BULK BUY", "📦 Bulk", "📦 Bulk Buy"}))
-async def bulk_buy_start_text(message: Message, state: FSMContext) -> None:
+async def bulk_buy_start_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
     product_id = data.get("selected_product_id")
     if not product_id:
-        await message.answer("Please select a product first.", reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        await message.answer("Please select a product first.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
     await state.update_data(product_id=product_id)
     await state.set_state(BulkBuyForm.quantity)
@@ -1343,7 +1350,7 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
             f"💰 Cost: {money(float(product_row[0].price) * len(stock_items)) if product_row else 'N/A'}\n\n"
             "Delivered account file is attached."
         ),
-        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
     )
     await notify_low_stock_if_needed(message, session, int(data["product_id"]), product_name)
 
@@ -1355,7 +1362,7 @@ async def direct_quantity_after_product(message: Message, state: FSMContext, ses
     if not product_id:
         await message.answer(
             "Please select a product first.",
-            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
     await state.update_data(product_id=product_id)
@@ -1368,7 +1375,7 @@ async def orders(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_or_create_user(session, callback.from_user)
     text = await order_history_text(session, user.id)
     await callback.message.edit_text(text)
-    await callback.message.answer("Menu", reply_markup=main_reply_menu(callback.from_user.id in get_settings().admin_ids))
+    await callback.message.answer("Menu", reply_markup=await dynamic_main_reply_menu(session, callback.from_user.id))
     await callback.answer()
 
 
@@ -1376,7 +1383,7 @@ async def orders(callback: CallbackQuery, session: AsyncSession) -> None:
 async def orders_text(message: Message, session: AsyncSession) -> None:
     user = await get_or_create_user(session, message.from_user)
     text = await order_history_text(session, user.id)
-    await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+    await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
 
 
 @router.message(StateFilter("*"), F.text.in_({"Status", "🧾 Status", "Deposit Status", "🧾 Deposit Status"}))
@@ -1384,7 +1391,7 @@ async def deposit_status_text(message: Message, session: AsyncSession, state: FS
     await state.clear()
     user = await get_or_create_user(session, message.from_user)
     text = await pending_payment_status_text(session, user.id)
-    await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+    await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
 
 
 @router.message(ReplaceForm.details)
@@ -1393,7 +1400,7 @@ async def replace_details(message: Message, state: FSMContext, session: AsyncSes
     block_text = account_block_text(user, "request replacement")
     if block_text:
         await state.clear()
-        await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        await message.answer(block_text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
     parsed = parse_replace_details(message.text)
     if not parsed:
@@ -1437,7 +1444,7 @@ async def _create_replace_from_proof(
         await state.clear()
         await message.answer(
             "Replacement session expired. Please start again from Replace.",
-            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
     user = await get_or_create_user(session, message.from_user)
@@ -1459,7 +1466,7 @@ async def _create_replace_from_proof(
         f"Order ID: #{request.order_id or 'Not given'}\n"
         f"Quantity: {request.quantity}\n\n"
         "Admin will check your proof. If approved, the replacement amount will be added to your balance.",
-        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
     )
 
 
@@ -1517,7 +1524,7 @@ async def deposit_method_text(message: Message, state: FSMContext, session: Asyn
     user = await get_or_create_user(session, message.from_user)
     block_text = account_block_text(user, "deposit")
     if block_text:
-        await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        await message.answer(block_text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
     method = DEPOSIT_METHOD_TEXTS[message.text]
     await state.update_data(method=method)
@@ -1579,7 +1586,7 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
         await message.answer(
             "Duplicate Transaction ID\n\n"
             "This transaction ID has already been submitted. If this is a mistake, please contact support.",
-            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
 
@@ -1604,7 +1611,7 @@ async def _process_deposit_screenshot(message: Message, state: FSMContext, sessi
         await message.answer(
             "Payment screenshot received, but deposit session was not found.\n\n"
             "Please start again: Top Up > payment method > amount > TXID > screenshot.",
-            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
 
@@ -1678,7 +1685,7 @@ async def _process_deposit_screenshot(message: Message, state: FSMContext, sessi
             f"Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n"
             f"Transaction ID: <code>{deposit.transaction_id}</code>\n\n"
             "Your balance has been updated automatically.",
-            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
     else:
         await message.answer(
@@ -1688,7 +1695,7 @@ async def _process_deposit_screenshot(message: Message, state: FSMContext, sessi
             f"Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n\n"
             f"Review note: {review_reason}\n\n"
             "This deposit needs admin verification before balance is added.",
-            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
 
 
@@ -1707,7 +1714,7 @@ async def photo_upload_fallback(message: Message, state: FSMContext, session: As
     await message.answer(
         "Photo received.\n\n"
         "If this is a payment screenshot, please start from Top Up and submit amount/TXID first.",
-        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
     )
 
 
@@ -1721,7 +1728,7 @@ async def coupon(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(StateFilter(None), F.text == "Coupon")
 async def coupon_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
     if not await coupons_enabled(session):
-        await message.answer("Coupon system is currently turned off.", reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        await message.answer("Coupon system is currently turned off.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
     await state.set_state(CouponForm.code)
     await message.answer("Coupon Redemption\n\nSend your coupon code.")
@@ -1732,7 +1739,7 @@ async def coupon_code(message: Message, state: FSMContext, session: AsyncSession
     user = await get_or_create_user(session, message.from_user)
     ok, text = await redeem_coupon(session, user, message.text)
     await state.clear()
-    await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+    await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
 
 
 @router.message(SellForm.details)
@@ -1742,7 +1749,7 @@ async def sell_request_finish(message: Message, state: FSMContext, session: Asyn
     block_text = account_block_text(user, "sell accounts")
     if block_text:
         await state.clear()
-        await message.answer(block_text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        await message.answer(block_text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         return
 
     details = message.text.strip()
@@ -1775,12 +1782,12 @@ async def sell_request_finish(message: Message, state: FSMContext, session: Asyn
     if sent:
         await message.answer(
             "Sell request submitted.\n\nAdmin will review your offer and contact you.",
-            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
     else:
         await message.answer(
             "Sell request saved, but admin notification could not be sent. Please contact support.",
-            reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
 
 
@@ -1826,7 +1833,7 @@ async def ai_help_message(message: Message, state: FSMContext, session: AsyncSes
         keep_ai_chat=True,
     )
     if not handled and not await answer_ai_intent(message, session, state, user, text):
-        await message.answer(ai_reply_text(agent.get("reply") or "Bujhlam. Arektu details bolen."), reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        await message.answer(ai_reply_text(agent.get("reply") or "Bujhlam. Arektu details bolen."), reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
 
 
 @router.callback_query(F.data == "referral")
@@ -1839,7 +1846,7 @@ async def referral(callback: CallbackQuery, session: AsyncSession) -> None:
         f"Commission: {get_settings().referral_commission_percent}%\n"
         f"Your link:\n{link}",
     )
-    await callback.message.answer("Menu", reply_markup=main_reply_menu(callback.from_user.id in get_settings().admin_ids))
+    await callback.message.answer("Menu", reply_markup=await dynamic_main_reply_menu(session, callback.from_user.id))
     await callback.answer()
 
 
@@ -1852,22 +1859,22 @@ async def referral_text(message: Message, session: AsyncSession) -> None:
         "Referral Program\n\n"
         f"Commission: {get_settings().referral_commission_percent}%\n"
         f"Your link:\n{link}",
-        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
     )
 
 
 @router.callback_query(F.data == "support")
-async def support(callback: CallbackQuery) -> None:
+async def support(callback: CallbackQuery, session: AsyncSession) -> None:
     username = clean_support_username(get_settings().support_username)
     await callback.message.edit_text(f"Support: @{username}")
-    await callback.message.answer("Menu", reply_markup=main_reply_menu(callback.from_user.id in get_settings().admin_ids))
+    await callback.message.answer("Menu", reply_markup=await dynamic_main_reply_menu(session, callback.from_user.id))
     await callback.answer()
 
 
 @router.message(StateFilter(None), F.text == "Support")
-async def support_text(message: Message) -> None:
+async def support_text(message: Message, session: AsyncSession) -> None:
     username = clean_support_username(get_settings().support_username)
-    await message.answer(f"Support: @{username}", reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+    await message.answer(f"Support: @{username}", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
 
 
 @router.message(Command("balance"))
@@ -1888,7 +1895,7 @@ async def document_upload_fallback(message: Message, state: FSMContext, session:
     await message.answer(
         "File received.\n\n"
         "File upload is only available for admin stock upload right now.",
-        reply_markup=main_reply_menu(False),
+        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
     )
 
 
@@ -1948,7 +1955,7 @@ async def universal_message_fallback(message: Message, state: FSMContext, sessio
         await message.answer(
             "Photo peyechi.\n\n"
             "Payment screenshot submit korte hole age Top Up theke amount and TXID dite hobe.",
-            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
 
@@ -1956,7 +1963,7 @@ async def universal_message_fallback(message: Message, state: FSMContext, sessio
         await message.answer(
             "File peyechi.\n\n"
             "Stock file upload only admin panel-er Add Stock flow theke kaj korbe.",
-            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
 
@@ -1964,11 +1971,11 @@ async def universal_message_fallback(message: Message, state: FSMContext, sessio
         await message.answer(
             "Message peyechi, but ei step-e eta valid input na.\n\n"
             "Please button/menu follow korun, ba Main Menu press kore abar try korun.",
-            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+            reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
 
     await message.answer(
         "Message peyechi. Menu theke option select korun, ba 🤖 AI button use korun.",
-        reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
     )

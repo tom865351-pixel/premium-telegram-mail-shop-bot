@@ -1,11 +1,15 @@
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
-def main_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
+def main_reply_menu(is_admin: bool = False, show_coupon: bool = True) -> ReplyKeyboardMarkup:
+    tools_row = [KeyboardButton(text="🔁 Replace")]
+    if show_coupon:
+        tools_row.append(KeyboardButton(text="🏷 Coupon"))
+    tools_row.append(KeyboardButton(text="🎁 Refer"))
     rows = [
         [KeyboardButton(text="🛍 Shop"), KeyboardButton(text="💼 Sell"), KeyboardButton(text="💳 Top Up")],
         [KeyboardButton(text="🤖 AI"), KeyboardButton(text="👤 Profile"), KeyboardButton(text="📜 History")],
-        [KeyboardButton(text="🔁 Replace"), KeyboardButton(text="🏷 Coupon"), KeyboardButton(text="🎁 Refer")],
+        tools_row,
         [KeyboardButton(text="🧾 Status")],
         [KeyboardButton(text="☎️ Support")],
     ]
