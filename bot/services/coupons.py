@@ -3,6 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import Coupon, CouponRedemption, User
+from bot.services.settings import coupons_enabled
 
 
 async def create_coupon(session: AsyncSession, code: str, amount: float, max_uses: int) -> Coupon:
@@ -14,6 +15,8 @@ async def create_coupon(session: AsyncSession, code: str, amount: float, max_use
 
 
 async def redeem_coupon(session: AsyncSession, user: User, code: str) -> tuple[bool, str]:
+    if not await coupons_enabled(session):
+        return False, "Coupon system is currently turned off."
     coupon = await session.scalar(select(Coupon).where(Coupon.code == code.upper().strip()))
     if not coupon or not coupon.is_active:
         return False, "Coupon not found or inactive."

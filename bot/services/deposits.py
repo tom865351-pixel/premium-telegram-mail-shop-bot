@@ -78,6 +78,19 @@ async def recent_deposits(session: AsyncSession, user_id: int, limit: int = 10) 
     return list(result.scalars().all())
 
 
+async def pending_deposits_for_user(session: AsyncSession, user_id: int, limit: int = 10) -> list[Deposit]:
+    result = await session.execute(
+        select(Deposit)
+        .where(
+            Deposit.user_id == user_id,
+            Deposit.status == DepositStatus.PENDING,
+        )
+        .order_by(Deposit.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def all_deposits(session: AsyncSession, limit: int = 500) -> list[Deposit]:
     result = await session.execute(select(Deposit).order_by(Deposit.id.desc()).limit(limit))
     return list(result.scalars().all())

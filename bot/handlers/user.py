@@ -15,11 +15,12 @@ from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, prod
 from bot.services.coupons import redeem_coupon
 from bot.database.models import DepositStatus, Order
 from bot.services.ai import ask_gemini_agent
-from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, recent_deposits, txid_exists
+from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, pending_deposits_for_user, recent_deposits, txid_exists
 from bot.services.ocr import analyze_payment_screenshot
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
 from bot.services.products import list_active_products, unsold_stock_count
 from bot.services.replacements import create_replacement_request, recent_replacements
+from bot.services.settings import coupons_enabled
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.utils.formatting import clean_support_username, money
 from bot.utils.ui import panel
@@ -673,14 +674,7 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
         return True
 
     if any(word in lowered for word in ("status", "deposit status", "pending", "approved")):
-        rows = await recent_deposits(session, user.id)
-        if not rows:
-            response = "Deposit Status\n\nNo deposits found."
-        else:
-            response = "Deposit Status\n\n" + "\n".join(
-                f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - {deposit.status.value}"
-                for deposit in rows
-            )
+        response = await pending_payment_status_text(session, user.id)
         await message.answer(response, reply_markup=main_reply_menu(is_admin))
         return True
 
@@ -694,6 +688,9 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
         return True
 
     if any(word in lowered for word in ("coupon", "code", "discount")):
+        if not await coupons_enabled(session):
+            await message.answer("Coupon system is currently turned off.", reply_markup=main_reply_menu(is_admin))
+            return True
         await state.set_state(CouponForm.code)
         await message.answer("Coupon Redemption\n\nSend your coupon code.")
         return True
@@ -789,14 +786,7 @@ async def execute_ai_action(
             await state.set_state(AIHelpForm.message)
         else:
             await state.clear()
-        rows = await recent_deposits(session, user.id)
-        if not rows:
-            text = "Deposit Status\n\nNo deposits found."
-        else:
-            text = "Deposit Status\n\n" + "\n".join(
-                f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - {deposit.status.value}"
-                for deposit in rows
-            )
+        text = await pending_payment_status_text(session, user.id)
         await message.answer(text, reply_markup=main_reply_menu(is_admin))
         return True
 
@@ -814,6 +804,9 @@ async def execute_ai_action(
         return True
 
     if action == "coupon":
+        if not await coupons_enabled(session):
+            await message.answer(ai_reply_text("Coupon system ekhon off ache."), reply_markup=main_reply_menu(is_admin))
+            return True
         await state.set_state(CouponForm.code)
         await message.answer(ai_reply_text(reply or "Coupon code pathan."))
         return True
@@ -863,6 +856,16 @@ async def send_deposit_for_insufficient_balance(message: Message, needed_amount:
         f"Need More: {money(max(needed_amount - current_balance, 0))}\n\n"
         "Please top up first. Select a payment method below.",
         reply_markup=deposit_methods_reply_menu(),
+    )
+
+
+async def pending_payment_status_text(session: AsyncSession, user_id: int) -> str:
+    rows = await pending_deposits_for_user(session, user_id, limit=10)
+    if not rows:
+        return "Payment Status\n\nNo pending payments."
+    return "Pending Payments\n\n" + "\n".join(
+        f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - pending"
+        for deposit in rows
     )
 
 
@@ -983,14 +986,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         return
 
     if selected == "Deposit Status":
-        rows = await recent_deposits(session, user.id)
-        if not rows:
-            text = "Deposit Status\n\nNo deposits found."
-        else:
-            text = "Deposit Status\n\n" + "\n".join(
-                f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - {deposit.status.value}"
-                for deposit in rows
-            )
+        text = await pending_payment_status_text(session, user.id)
         await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
         return
 
@@ -1006,6 +1002,9 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         return
 
     if selected == "Coupon":
+        if not await coupons_enabled(session):
+            await message.answer("Coupon system is currently turned off.", reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+            return
         await state.set_state(CouponForm.code)
         await message.answer("Coupon Redemption\n\nSend your coupon code.")
         return
@@ -1337,14 +1336,7 @@ async def orders_text(message: Message, session: AsyncSession) -> None:
 async def deposit_status_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     user = await get_or_create_user(session, message.from_user)
-    rows = await recent_deposits(session, user.id, limit=10)
-    if not rows:
-        text = "Deposit Status\n\nNo deposits found."
-    else:
-        text = "Deposit Status\n\n" + "\n".join(
-            f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - {deposit.status.value}"
-            for deposit in rows
-        )
+    text = await pending_payment_status_text(session, user.id)
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
 
 
@@ -1680,7 +1672,10 @@ async def coupon(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(StateFilter(None), F.text == "Coupon")
-async def coupon_text(message: Message, state: FSMContext) -> None:
+async def coupon_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not await coupons_enabled(session):
+        await message.answer("Coupon system is currently turned off.", reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
+        return
     await state.set_state(CouponForm.code)
     await message.answer("Coupon Redemption\n\nSend your coupon code.")
 

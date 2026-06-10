@@ -60,6 +60,19 @@ def export_reply_menu() -> ReplyKeyboardMarkup:
     )
 
 
+def coupon_admin_reply_menu(enabled: bool) -> ReplyKeyboardMarkup:
+    toggle_text = "Turn Coupons Off" if enabled else "Turn Coupons On"
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=toggle_text), KeyboardButton(text="Create Coupon")],
+            [KeyboardButton(text="⚙️ Admin Panel")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Manage coupons",
+    )
+
+
 def member_actions_reply_menu(user_id: int, is_banned: bool, is_restricted: bool) -> ReplyKeyboardMarkup:
     ban_label = "Unban" if is_banned else "Ban"
     restrict_label = "Unrestrict" if is_restricted else "Restrict"

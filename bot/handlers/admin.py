@@ -15,6 +15,7 @@ from bot.config import get_settings
 from bot.keyboards.admin import (
     admin_reply_menu,
     admin_products_reply_menu,
+    coupon_admin_reply_menu,
     delete_product_confirm_reply_menu,
     deposit_review_reply_menu,
     export_reply_menu,
@@ -40,6 +41,7 @@ from bot.services.auto_stock import (
     upsert_auto_stock_source,
 )
 from bot.services.stats import admin_stats
+from bot.services.settings import coupons_enabled, set_coupons_enabled
 from bot.services.orders import all_orders, get_order, order_count, refund_order, sales_report, total_spent
 from bot.services.replacements import pending_replacements, review_replacement
 from bot.services.users import adjust_user_balance, find_user, list_all_users, list_recent_users, set_user_banned, set_user_note, set_user_restricted
@@ -1646,6 +1648,36 @@ async def add_stock_for_product(callback: CallbackQuery, state: FSMContext) -> N
 
 
 @router.message(StateFilter("*"), F.text.in_({"Coupons", "COUPONS", "🏷 Coupons"}))
+async def coupons_manage_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    enabled = await coupons_enabled(session)
+    await message.answer(
+        "Coupon Settings\n\n"
+        f"Status: {'ON' if enabled else 'OFF'}\n\n"
+        "Use the keyboard below to turn coupons on/off or create a new coupon.",
+        reply_markup=coupon_admin_reply_menu(enabled),
+    )
+
+
+@router.message(StateFilter("*"), F.text.in_({"Turn Coupons On", "Turn Coupons Off"}))
+async def coupon_toggle_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    if not is_admin(message.from_user.id):
+        await message.answer("You are not authorized.")
+        return
+    enabled = message.text == "Turn Coupons On"
+    await set_coupons_enabled(session, enabled)
+    await log_admin_action(session, message.from_user.id, "coupon_system_toggle", details=f"enabled={enabled}")
+    await message.answer(
+        f"Coupon system is now {'ON' if enabled else 'OFF'}.",
+        reply_markup=coupon_admin_reply_menu(enabled),
+    )
+
+
+@router.message(StateFilter("*"), F.text == "Create Coupon")
 async def add_coupon_start_text(message: Message, state: FSMContext) -> None:
     await state.clear()
     if not is_admin(message.from_user.id):
