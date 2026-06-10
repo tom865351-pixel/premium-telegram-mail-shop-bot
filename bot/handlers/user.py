@@ -2,6 +2,7 @@ import re
 from io import BytesIO
 
 from aiogram import F, Router
+from aiogram.exceptions import SkipHandler
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -1260,6 +1261,17 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
         reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
     )
     await notify_low_stock_if_needed(message, session, int(data["product_id"]), product_name)
+
+
+@router.message(StateFilter(None), F.text.regexp(r"^\d+$"))
+async def direct_quantity_after_product(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    data = await state.get_data()
+    product_id = data.get("selected_product_id")
+    if not product_id:
+        raise SkipHandler()
+    await state.update_data(product_id=product_id)
+    await state.set_state(BulkBuyForm.quantity)
+    await bulk_buy_finish(message, state, session)
 
 
 @router.callback_query(F.data == "orders")

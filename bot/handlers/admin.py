@@ -142,7 +142,7 @@ def _is_product_selection(text: str) -> bool:
 
 def _is_product_id_selection(text: str | None) -> bool:
     normalized = _button_text(text)
-    return normalized.isdigit()
+    return normalized.startswith("#") and normalized[1:].isdigit()
 
 
 def _is_add_stock_action(text: str) -> bool:
@@ -1170,7 +1170,7 @@ async def admin_product_id_text(message: Message, session: AsyncSession, state: 
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    product_id = int(_button_text(message.text))
+    product_id = int(_button_text(message.text).lstrip("#"))
     rows = await list_all_products(session)
     product_row = next((row for row in rows if row[0].id == product_id), None)
     if not product_row:
