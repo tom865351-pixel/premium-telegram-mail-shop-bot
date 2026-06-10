@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     support_username: str = Field(default="support", alias="SUPPORT_USERNAME")
     min_deposit: float = Field(default=1.0, alias="MIN_DEPOSIT")
     currency_symbol: str = Field(default="$", alias="CURRENCY_SYMBOL")
+    usd_to_tk_rate: float = Field(default=125.0, alias="USD_TO_TK_RATE")
     semi_auto_deposit_enabled: bool = Field(default=True, alias="SEMI_AUTO_DEPOSIT_ENABLED")
     semi_auto_deposit_max_amount: float = Field(default=100, alias="SEMI_AUTO_DEPOSIT_MAX_AMOUNT")
     semi_auto_trusted_user_min_approved_deposits: int = Field(

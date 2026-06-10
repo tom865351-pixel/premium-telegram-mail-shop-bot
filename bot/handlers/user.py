@@ -179,6 +179,8 @@ DEPOSIT_METHOD_LABELS = {
     "rocket": "Rocket",
 }
 
+USD_DEPOSIT_METHODS = {"binance", "usdt_trc20", "usdt_bep20"}
+
 MENU_ALIASES = {
     "🏠 Main Menu": "Main Menu",
     "🏠 Menu": "Main Menu",
@@ -873,6 +875,19 @@ async def send_deposit_for_insufficient_balance(message: Message, needed_amount:
     )
 
 
+def deposit_rate_note(method: str, amount: float | None = None) -> str:
+    if method not in USD_DEPOSIT_METHODS:
+        return ""
+    rate = get_settings().usd_to_tk_rate
+    if amount is None:
+        return f"\n\nUSD/USDT rate: 1 USD = {rate:g} TK.\nEnter amount in TK; bot will show the USD/USDT amount next."
+    usd_amount = float(amount) / rate if rate else 0
+    return (
+        f"\n\nUSD/USDT rate: 1 USD = {rate:g} TK\n"
+        f"Send approx: {usd_amount:.2f} USD/USDT"
+    )
+
+
 async def pending_payment_status_text(session: AsyncSession, user_id: int) -> str:
     rows = await pending_deposits_for_user(session, user_id, limit=10)
     if not rows:
@@ -1515,7 +1530,11 @@ async def deposit_method(callback: CallbackQuery, state: FSMContext) -> None:
     method = callback.data.split(":", 1)[1]
     await state.update_data(method=method)
     await state.set_state(DepositForm.amount)
-    await callback.message.edit_text("Enter deposit amount.")
+    await callback.message.edit_text(
+        f"Payment Method: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n\n"
+        "Enter the amount you want to deposit in TK."
+        f"{deposit_rate_note(method)}"
+    )
     await callback.answer()
 
 
@@ -1531,7 +1550,8 @@ async def deposit_method_text(message: Message, state: FSMContext, session: Asyn
     await state.set_state(DepositForm.amount)
     await message.answer(
         f"Payment Method: {DEPOSIT_METHOD_LABELS[method]}\n\n"
-        "Enter the amount you want to deposit."
+        "Enter the amount you want to deposit in TK."
+        f"{deposit_rate_note(method)}"
     )
 
 
@@ -1571,6 +1591,7 @@ async def deposit_amount(message: Message, state: FSMContext) -> None:
         f"Amount: {money(amount)}\n"
         f"Method: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n"
         f"Payment Number/Address: <code>{payment_info or 'Contact support for payment details'}</code>\n\n"
+        f"{deposit_rate_note(method, amount)}\n\n"
         "After sending payment, reply with your transaction ID/reference."
     )
 
