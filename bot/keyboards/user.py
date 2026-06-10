@@ -4,7 +4,7 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 def main_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="🛍 Shop"), KeyboardButton(text="💼 Sell"), KeyboardButton(text="💳 Top Up")],
-        [KeyboardButton(text="🤖 AI"), KeyboardButton(text="👤 Profile"), KeyboardButton(text="📦 Orders")],
+        [KeyboardButton(text="🤖 AI"), KeyboardButton(text="👤 Profile"), KeyboardButton(text="📜 History")],
         [KeyboardButton(text="🔁 Replace"), KeyboardButton(text="🏷 Coupon"), KeyboardButton(text="🎁 Refer")],
         [KeyboardButton(text="🧾 Status")],
         [KeyboardButton(text="☎️ Support")],
@@ -16,6 +16,21 @@ def main_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Select an option",
+    )
+
+
+def history_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text="💳 Deposit History"), KeyboardButton(text="📦 Order History")],
+        [KeyboardButton(text="🏠 Main Menu")],
+    ]
+    if is_admin:
+        rows.append([KeyboardButton(text="⚙️ Admin Panel")])
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Select history",
     )
 
 

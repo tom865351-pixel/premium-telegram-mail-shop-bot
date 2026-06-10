@@ -164,6 +164,34 @@ async def recent_orders(session: AsyncSession, user_id: int, limit: int = 10) ->
     return list(result.scalars().all())
 
 
+async def recent_order_groups(session: AsyncSession, user_id: int, limit: int = 15) -> list[dict[str, object]]:
+    result = await session.execute(
+        select(Order, Product.name)
+        .join(Product, Product.id == Order.product_id)
+        .where(Order.user_id == user_id)
+        .order_by(Order.id.desc())
+        .limit(500)
+    )
+    groups: dict[tuple[int, float, str, str], dict[str, object]] = {}
+    ordered_keys: list[tuple[int, float, str, str]] = []
+    for order, product_name in result.all():
+        minute_key = order.created_at.strftime("%Y-%m-%d %H:%M") if order.created_at else ""
+        key = (order.product_id, float(order.amount), order.status.value, minute_key)
+        if key not in groups:
+            groups[key] = {
+                "product_name": product_name,
+                "quantity": 0,
+                "unit_price": float(order.amount),
+                "total": 0.0,
+                "status": order.status.value,
+                "created_at": order.created_at,
+            }
+            ordered_keys.append(key)
+        groups[key]["quantity"] = int(groups[key]["quantity"]) + 1
+        groups[key]["total"] = float(groups[key]["total"]) + float(order.amount)
+    return [groups[key] for key in ordered_keys[:limit]]
+
+
 async def get_order(session: AsyncSession, order_id: int) -> Order | None:
     return await session.get(Order, order_id)
 

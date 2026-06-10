@@ -11,13 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
 from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu, replacement_review_reply_menu
-from bot.keyboards.user import deposit_methods_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
+from bot.keyboards.user import deposit_methods_reply_menu, history_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
 from bot.services.coupons import redeem_coupon
 from bot.database.models import DepositStatus, Order
 from bot.services.ai import ask_gemini_agent
 from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, pending_deposits_for_user, recent_deposits, txid_exists
 from bot.services.ocr import analyze_payment_screenshot
-from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_orders, spent_today, total_spent
+from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_order_groups, spent_today, total_spent
 from bot.services.products import list_active_products, unsold_stock_count
 from bot.services.replacements import create_replacement_request, recent_replacements
 from bot.services.settings import coupons_enabled
@@ -58,6 +58,13 @@ RESERVED_REPLY_TEXTS = {
     "COUPON",
     "Coupon",
     "📦 Orders",
+    "📜 History",
+    "History",
+    "HISTORY",
+    "💳 Deposit History",
+    "Deposit History",
+    "📦 Order History",
+    "Order History",
     "MY ORDERS",
     "Orders",
     "☎️ Support",
@@ -181,6 +188,12 @@ MENU_ALIASES = {
     "💳 Top Up": "Deposit",
     "👤 Profile": "Profile",
     "📦 Orders": "Orders",
+    "📜 History": "History",
+    "HISTORY": "History",
+    "💳 Deposit History": "Deposit History",
+    "DEPOSIT HISTORY": "Deposit History",
+    "📦 Order History": "Order History",
+    "ORDER HISTORY": "Order History",
     "🧾 Status": "Deposit Status",
     "🎁 Refer": "Referral",
     "🏷 Coupon": "Coupon",
@@ -261,6 +274,9 @@ GLOBAL_MENU_TEXTS = {
     "AI",
     "Profile",
     "Orders",
+    "History",
+    "Deposit History",
+    "Order History",
     "Deposit Status",
     "Referral",
     "Coupon",
@@ -286,6 +302,9 @@ GLOBAL_MENU_TEXTS = {
     "💳 Top Up",
     "👤 Profile",
     "📦 Orders",
+    "📜 History",
+    "💳 Deposit History",
+    "📦 Order History",
     "🧾 Status",
     "🧾 Deposit Status",
     "🎁 Refer",
@@ -663,13 +682,7 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
         return True
 
     if any(word in lowered for word in ("order", "history", "purchase", "invoice", "অর্ডার")):
-        rows = await recent_orders(session, user.id)
-        if not rows:
-            response = "Order History\n\nNo orders found."
-        else:
-            response = "Recent Orders\n\n" + "\n".join(
-                f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
-            )
+        response = await order_history_text(session, user.id)
         await message.answer(response, reply_markup=main_reply_menu(is_admin))
         return True
 
@@ -771,13 +784,7 @@ async def execute_ai_action(
             await state.set_state(AIHelpForm.message)
         else:
             await state.clear()
-        rows = await recent_orders(session, user.id)
-        if not rows:
-            text = "Order History\n\nNo orders found."
-        else:
-            text = "Recent Orders\n\n" + "\n".join(
-                f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
-            )
+        text = await order_history_text(session, user.id)
         await message.answer(text, reply_markup=main_reply_menu(is_admin))
         return True
 
@@ -869,6 +876,31 @@ async def pending_payment_status_text(session: AsyncSession, user_id: int) -> st
     )
 
 
+async def order_history_text(session: AsyncSession, user_id: int) -> str:
+    groups = await recent_order_groups(session, user_id)
+    if not groups:
+        return "Order History\n\nNo orders found."
+    blocks = []
+    for group in groups:
+        blocks.append(
+            "✅ Purchase Successful!\n"
+            f"📦 Category: {group['product_name']}\n"
+            f"🔢 Quantity: {group['quantity']} pcs\n"
+            f"💰 Cost: {money(float(group['total']))}"
+        )
+    return "\n\n".join(blocks)
+
+
+async def deposit_history_text(session: AsyncSession, user_id: int) -> str:
+    deposits = await recent_deposits(session, user_id, limit=15)
+    if not deposits:
+        return "Deposit History\n\nNo deposits found."
+    return "Deposit History\n\n" + "\n".join(
+        f"#{deposit.id} - {money(deposit.amount)} - {deposit.method.upper()} - {deposit.status.value}"
+        for deposit in deposits
+    )
+
+
 @router.message(Command("start"))
 async def start(message: Message, command: CommandObject, session: AsyncSession) -> None:
     await send_menu(message, session, command.args)
@@ -890,6 +922,9 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         "Coupon": "redeem coupons",
         "Referral": "use referral",
         "Orders": "view orders",
+        "History": "view history",
+        "Deposit History": "view deposit history",
+        "Order History": "view order history",
     }
     if selected in restricted_actions:
         block_text = account_block_text(user, restricted_actions[selected])
@@ -975,14 +1010,29 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         return
 
     if selected == "Orders":
-        rows = await recent_orders(session, user.id)
-        if not rows:
-            text = "Order History\n\nNo orders found."
-        else:
-            text = "Recent Orders\n\n" + "\n".join(
-                f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
-            )
+        text = await order_history_text(session, user.id)
         await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in settings.admin_ids))
+        return
+
+    if selected == "History":
+        await message.answer(
+            "History\n\nSelect what you want to view.",
+            reply_markup=history_reply_menu(message.from_user.id in settings.admin_ids),
+        )
+        return
+
+    if selected == "Deposit History":
+        await message.answer(
+            await deposit_history_text(session, user.id),
+            reply_markup=history_reply_menu(message.from_user.id in settings.admin_ids),
+        )
+        return
+
+    if selected == "Order History":
+        await message.answer(
+            await order_history_text(session, user.id),
+            reply_markup=history_reply_menu(message.from_user.id in settings.admin_ids),
+        )
         return
 
     if selected == "Deposit Status":
@@ -1154,11 +1204,11 @@ async def send_product_detail_message(
 async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
     product_id = int(callback.data.split(":", 1)[1])
     user = await get_or_create_user(session, callback.from_user)
+    product_rows = await list_active_products(session)
+    product_row = next((row for row in product_rows if row[0].id == product_id), None)
     ok, message, stock_item = await purchase_product(session, user, product_id)
     if not ok:
         if message.startswith("Insufficient balance"):
-            product_rows = await list_active_products(session)
-            product_row = next((row for row in product_rows if row[0].id == product_id), None)
             needed = float(product_row[0].price) if product_row else 0.0
             await callback.message.answer(
                 "Insufficient Balance\n\n"
@@ -1173,10 +1223,10 @@ async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     await callback.message.answer(
-        "Order Invoice\n\n"
-        f"Order ID: #{stock_item.sold_order_id}\n"
-        f"Product ID: #{product_id}\n"
-        "Status: completed\n\n"
+        "✅ Purchase Successful!\n"
+        f"📦 Category: {product_row[0].name if product_row else f'#{product_id}'}\n"
+        "🔢 Quantity: 1 pcs\n"
+        f"💰 Cost: {money(product_row[0].price) if product_row else 'N/A'}\n\n"
         "Delivered Account:\n"
         f"<code>{stock_item.payload}</code>",
     )
@@ -1207,11 +1257,10 @@ async def buy_product_text(message: Message, state: FSMContext, session: AsyncSe
 
     await state.clear()
     await message.answer(
-        "Order Invoice\n\n"
-        f"Order ID: #{stock_item.sold_order_id}\n"
-        f"Product: {product_name}\n"
-        f"Price: {money(product_row[0].price) if product_row else 'N/A'}\n"
-        "Status: completed\n\n"
+        "✅ Purchase Successful!\n"
+        f"📦 Category: {product_name}\n"
+        "🔢 Quantity: 1 pcs\n"
+        f"💰 Cost: {money(product_row[0].price) if product_row else 'N/A'}\n\n"
         "Delivered Account:\n"
         f"<code>{stock_item.payload}</code>",
         reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
@@ -1221,6 +1270,11 @@ async def buy_product_text(message: Message, state: FSMContext, session: AsyncSe
 
 @router.message(StateFilter("*"), F.text == "🛒 Single")
 async def buy_product_text_current_keyboard(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await buy_product_text(message, state, session)
+
+
+@router.message(StateFilter("*"), F.text == "🛒 Single")
+async def buy_product_text_emoji_keyboard(message: Message, state: FSMContext, session: AsyncSession) -> None:
     await buy_product_text(message, state, session)
 
 
@@ -1247,6 +1301,11 @@ async def bulk_buy_start_text(message: Message, state: FSMContext) -> None:
 
 @router.message(StateFilter("*"), F.text == "📦 Bulk")
 async def bulk_buy_start_text_current_keyboard(message: Message, state: FSMContext) -> None:
+    await bulk_buy_start_text(message, state)
+
+
+@router.message(StateFilter("*"), F.text == "📦 Bulk")
+async def bulk_buy_start_text_emoji_keyboard(message: Message, state: FSMContext) -> None:
     await bulk_buy_start_text(message, state)
 
 
@@ -1278,11 +1337,11 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
     await message.answer_document(
         delivery_file,
         caption=(
-            "Bulk Order Invoice\n\n"
-            f"Product: {product_name}\n"
-            f"Quantity: {len(stock_items)}\n"
-            f"Status: completed\n\n"
-            f"{text}\n\nDelivered {len(stock_items)} account(s) in an Excel file."
+            "✅ Purchase Successful!\n"
+            f"📦 Category: {product_name}\n"
+            f"🔢 Quantity: {len(stock_items)} pcs\n"
+            f"💰 Cost: {money(float(product_row[0].price) * len(stock_items)) if product_row else 'N/A'}\n\n"
+            "Delivered account file is attached."
         ),
         reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
     )
@@ -1307,13 +1366,7 @@ async def direct_quantity_after_product(message: Message, state: FSMContext, ses
 @router.callback_query(F.data == "orders")
 async def orders(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_or_create_user(session, callback.from_user)
-    rows = await recent_orders(session, user.id)
-    if not rows:
-        text = "Order History\n\nNo orders found."
-    else:
-        text = "Recent Orders\n\n" + "\n".join(
-            f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
-        )
+    text = await order_history_text(session, user.id)
     await callback.message.edit_text(text)
     await callback.message.answer("Menu", reply_markup=main_reply_menu(callback.from_user.id in get_settings().admin_ids))
     await callback.answer()
@@ -1322,13 +1375,7 @@ async def orders(callback: CallbackQuery, session: AsyncSession) -> None:
 @router.message(StateFilter(None), F.text == "Orders")
 async def orders_text(message: Message, session: AsyncSession) -> None:
     user = await get_or_create_user(session, message.from_user)
-    rows = await recent_orders(session, user.id)
-    if not rows:
-        text = "Order History\n\nNo orders found."
-    else:
-        text = "Recent Orders\n\n" + "\n".join(
-            f"#{order.id} - {money(order.amount)} - {order.created_at:%Y-%m-%d %H:%M}" for order in rows
-        )
+    text = await order_history_text(session, user.id)
     await message.answer(text, reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids))
 
 
