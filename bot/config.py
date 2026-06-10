@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     ai_provider: str = Field(default="gemini", alias="AI_PROVIDER")
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
+    force_join_enabled: bool = Field(default=True, alias="FORCE_JOIN_ENABLED")
+    required_channel_username: str = Field(default="@PremiumXMethod", alias="REQUIRED_CHANNEL_USERNAME")
+    required_channel_link: str = Field(default="https://t.me/PremiumXMethod", alias="REQUIRED_CHANNEL_LINK")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

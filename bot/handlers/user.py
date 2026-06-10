@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import get_settings
 from bot.keyboards.admin import admin_reply_menu, deposit_review_reply_menu, replacement_review_reply_menu
 from bot.keyboards.user import deposit_methods_reply_menu, history_reply_menu, main_reply_menu, product_buy_reply_menu, products_reply_menu
+from bot.middlewares.force_join import JOIN_CHECK_CALLBACK, force_join_keyboard, force_join_text, is_channel_member
 from bot.services.coupons import redeem_coupon
 from bot.database.models import DepositStatus, Order
 from bot.services.ai import ask_gemini_agent
@@ -926,6 +927,22 @@ async def deposit_history_text(session: AsyncSession, user_id: int) -> str:
 @router.message(Command("start"))
 async def start(message: Message, command: CommandObject, session: AsyncSession) -> None:
     await send_menu(message, session, command.args)
+
+
+@router.callback_query(F.data == JOIN_CHECK_CALLBACK)
+async def force_join_check(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not await is_channel_member(callback.bot, callback.from_user.id):
+        await callback.answer("Channel join korar por abar try korun.", show_alert=True)
+        if callback.message:
+            await callback.message.answer(force_join_text(), reply_markup=force_join_keyboard())
+        return
+    await callback.answer("Verified.")
+    if callback.message:
+        user = await get_or_create_user(session, callback.from_user)
+        await callback.message.answer(
+            "✅ Channel verified.\n\n" + await profile_text(session, user),
+            reply_markup=await dynamic_main_reply_menu(session, callback.from_user.id),
+        )
 
 
 @router.message(StateFilter("*"), F.text.in_(GLOBAL_MENU_TEXTS))
