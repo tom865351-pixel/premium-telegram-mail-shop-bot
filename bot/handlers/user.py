@@ -356,10 +356,10 @@ def build_bulk_delivery_file(stock_items: list[object]) -> BufferedInputFile:
     has_token = False
     has_recovery = False
 
-    for index, item in enumerate(stock_items, start=1):
+    for item in stock_items:
         payload = item.payload.strip()
         username, password = payload, ""
-        token, recovery = "", ""
+        recovery = ""
         if "|" in payload:
             parts = [part.strip() for part in payload.split("|")]
             username = parts[0]
@@ -367,38 +367,33 @@ def build_bulk_delivery_file(stock_items: list[object]) -> BufferedInputFile:
             if len(parts) > 2:
                 third_value = parts[2]
                 if third_value.startswith("M.") or len(third_value) > 80:
-                    token = third_value
                     has_token = True
                 else:
                     recovery = third_value
                     has_recovery = True
         rows.append(
             {
-                "No": str(index),
                 "Email/Username": username,
                 "Password": password,
-                "Token": token,
+                "Token": payload,
                 "Recovery": recovery,
-                "Full Account": payload,
             }
         )
 
-    headers = ["No", "Email/Username", "Password"]
     if has_token:
-        headers.append("Token")
-    if has_recovery:
+        headers = ["Token"]
+    else:
+        headers = ["Email/Username", "Password"]
+    if has_recovery and not has_token:
         headers.append("Recovery")
-    headers.append("Full Account")
     worksheet.append(headers)
 
     for row in rows:
         worksheet.append([row.get(header, "") for header in headers])
 
-    worksheet.column_dimensions["A"].width = 8
-    worksheet.column_dimensions["B"].width = 36
-    worksheet.column_dimensions["C"].width = 24
-    for column in ("D", "E", "F"):
-        worksheet.column_dimensions[column].width = 56
+    worksheet.column_dimensions["A"].width = 72 if has_token else 36
+    worksheet.column_dimensions["B"].width = 28
+    worksheet.column_dimensions["C"].width = 44
 
     output = BytesIO()
     workbook.save(output)
