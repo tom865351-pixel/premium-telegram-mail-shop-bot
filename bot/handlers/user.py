@@ -2,7 +2,6 @@ import re
 from io import BytesIO
 
 from aiogram import F, Router
-from aiogram.exceptions import SkipHandler
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -1296,7 +1295,11 @@ async def direct_quantity_after_product(message: Message, state: FSMContext, ses
     data = await state.get_data()
     product_id = data.get("selected_product_id")
     if not product_id:
-        raise SkipHandler()
+        await message.answer(
+            "Please select a product first.",
+            reply_markup=main_reply_menu(message.from_user.id in get_settings().admin_ids),
+        )
+        return
     await state.update_data(product_id=product_id)
     await state.set_state(BulkBuyForm.quantity)
     await bulk_buy_finish(message, state, session)
