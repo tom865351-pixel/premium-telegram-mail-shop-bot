@@ -10,7 +10,6 @@ def main_reply_menu(is_admin: bool = False, show_coupon: bool = True) -> ReplyKe
         [KeyboardButton(text="🛍 Shop"), KeyboardButton(text="💼 Sell"), KeyboardButton(text="💳 Top Up")],
         [KeyboardButton(text="🤖 AI"), KeyboardButton(text="👤 Profile"), KeyboardButton(text="📜 History")],
         tools_row,
-        [KeyboardButton(text="🧾 Status")],
         [KeyboardButton(text="☎️ Support")],
     ]
     if is_admin:
