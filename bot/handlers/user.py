@@ -971,21 +971,25 @@ async def order_history_text(session: AsyncSession, user_id: int, groups: list[d
         return "📦 Order History\n\nএখনও কোনো order পাওয়া যায়নি।"
     blocks = []
     for group in groups:
-        items = group.get("items") or []
-        delivered = ""
-        if items:
-            delivered = "\n\n📩 Delivered:\n" + "\n".join(f"<code>{html.escape(str(item))}</code>" for item in items[:5])
-            if len(items) > 5:
-                delivered += f"\n...and {len(items) - 5} more"
         blocks.append(
             "✅ Purchase Successful!\n"
             f"📦 Category: {html.escape(str(group['product_name']))}\n"
             f"🔢 Quantity: {group['quantity']} pcs\n"
-            f"💰 Cost: {money(float(group['total']))}"
-            f"{delivered}"
+            f"💰 Cost: {money(float(group['total']))}\n"
+            "📁 Delivered accounts: Excel file-এ দেওয়া আছে।"
         )
     text = "\n\n".join(blocks)
-    return text[:3900] + ("\n\nআরও history দেখতে admin/support এ যোগাযোগ করুন।" if len(text) > 3900 else "")
+    if len(text) <= 3900:
+        return text
+    safe_blocks = []
+    total_length = 0
+    for block in blocks:
+        next_length = total_length + len(block) + (2 if safe_blocks else 0)
+        if next_length > 3700:
+            break
+        safe_blocks.append(block)
+        total_length = next_length
+    return "\n\n".join(safe_blocks) + "\n\nআরও order Excel file-এ দেওয়া আছে।"
 
 
 async def send_order_history(message: Message, session: AsyncSession, user_id: int, reply_markup=None) -> None:
