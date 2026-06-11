@@ -1,4 +1,5 @@
 import html
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -30,6 +31,7 @@ from bot.utils.formatting import clean_support_username, money
 from bot.utils.ui import panel
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 RESERVED_REPLY_TEXTS = {
     "🏠 Main Menu",
@@ -425,6 +427,11 @@ def build_bulk_delivery_file(stock_items: list[object]) -> BufferedInputFile:
     return BufferedInputFile(output.read(), filename="bulk_accounts.xlsx")
 
 
+def excel_safe(value: object) -> str:
+    text = "" if value is None else str(value)
+    return re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]", "", text)
+
+
 def build_order_history_file(groups: list[dict[str, object]]) -> BufferedInputFile | None:
     total_items = sum(len(group.get("items") or []) for group in groups)
     if total_items <= 0:
@@ -438,10 +445,10 @@ def build_order_history_file(groups: list[dict[str, object]]) -> BufferedInputFi
         items = group.get("items") or []
         for item in items:
             worksheet.append([
-                group.get("product_name", ""),
+                excel_safe(group.get("product_name", "")),
                 group.get("quantity", 0),
                 float(group.get("total", 0)),
-                item,
+                excel_safe(item),
             ])
     worksheet.column_dimensions["A"].width = 28
     worksheet.column_dimensions["B"].width = 12
@@ -958,8 +965,8 @@ async def pending_payment_status_text(session: AsyncSession, user_id: int) -> st
     )
 
 
-async def order_history_text(session: AsyncSession, user_id: int) -> str:
-    groups = await recent_order_groups(session, user_id)
+async def order_history_text(session: AsyncSession, user_id: int, groups: list[dict[str, object]] | None = None) -> str:
+    groups = groups if groups is not None else await recent_order_groups(session, user_id)
     if not groups:
         return "📦 Order History\n\nএখনও কোনো order পাওয়া যায়নি।"
     blocks = []
@@ -986,12 +993,21 @@ async def send_order_history(message: Message, session: AsyncSession, user_id: i
     if not groups:
         await message.answer("📦 Order History\n\nএখনও কোনো order পাওয়া যায়নি।", reply_markup=reply_markup)
         return
-    await message.answer(await order_history_text(session, user_id), reply_markup=reply_markup)
-    history_file = build_order_history_file(groups)
-    if history_file:
-        await message.answer_document(
-            history_file,
-            caption="📁 আপনার order history file।\nসব delivered account এই Excel file-এ দেওয়া আছে।",
+    await message.answer(await order_history_text(session, user_id, groups), reply_markup=reply_markup)
+    try:
+        history_file = build_order_history_file(groups)
+        if history_file:
+            await message.answer_document(
+                history_file,
+                caption="📁 আপনার order history file।\nসব delivered account এই Excel file-এ দেওয়া আছে।",
+            )
+    except Exception:
+        logger.exception("Could not send order history file for user_id=%s", user_id)
+        await message.answer(
+            "📦 Order History\n\n"
+            "Summary দেখানো হয়েছে, কিন্তু Excel file পাঠাতে সমস্যা হয়েছে।\n"
+            "একটু পরে আবার try করুন অথবা support-এ message করুন।",
+            reply_markup=reply_markup,
         )
 
 
