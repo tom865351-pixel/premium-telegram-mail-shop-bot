@@ -432,7 +432,12 @@ def excel_safe(value: object) -> str:
     return re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]", "", text)
 
 
-def build_order_history_file(groups: list[dict[str, object]]) -> BufferedInputFile | None:
+def file_safe(value: object) -> str:
+    text = re.sub(r"[^A-Za-z0-9_-]+", "_", excel_safe(value).strip().lower())
+    return text.strip("_")[:32] or "order"
+
+
+def build_order_history_file(groups: list[dict[str, object]], filename: str | None = None) -> BufferedInputFile | None:
     total_items = sum(len(group.get("items") or []) for group in groups)
     if total_items <= 0:
         return None
@@ -458,7 +463,13 @@ def build_order_history_file(groups: list[dict[str, object]]) -> BufferedInputFi
     output = BytesIO()
     workbook.save(output)
     output.seek(0)
-    return BufferedInputFile(output.read(), filename=f"order_history_{total_items}_pcs.xlsx")
+    return BufferedInputFile(output.read(), filename=filename or f"order_history_{total_items}_pcs.xlsx")
+
+
+def build_order_history_group_file(group: dict[str, object], index: int) -> BufferedInputFile | None:
+    quantity = int(group.get("quantity") or len(group.get("items") or []))
+    product_name = file_safe(group.get("product_name", "order"))
+    return build_order_history_file([group], filename=f"order_{index}_{quantity}_pcs_{product_name}.xlsx")
 
 
 def user_label(user: object) -> str:
@@ -997,14 +1008,15 @@ async def send_order_history(message: Message, session: AsyncSession, user_id: i
     if not groups:
         await message.answer("📦 Order History\n\nএখনও কোনো order পাওয়া যায়নি।", reply_markup=reply_markup)
         return
-    await message.answer(await order_history_text(session, user_id, groups), reply_markup=reply_markup)
     try:
-        history_file = build_order_history_file(groups)
-        if history_file:
-            await message.answer_document(
-                history_file,
-                caption="📁 আপনার order history file।\nসব delivered account এই Excel file-এ দেওয়া আছে।",
-            )
+        for index, group in enumerate(groups, start=1):
+            await message.answer(await order_history_text(session, user_id, [group]), reply_markup=reply_markup if index == 1 else None)
+            history_file = build_order_history_group_file(group, index)
+            if history_file:
+                await message.answer_document(
+                    history_file,
+                    caption="📁 এই order-এর delivered accounts Excel file-এ দেওয়া আছে।",
+                )
     except Exception:
         logger.exception("Could not send order history file for user_id=%s", user_id)
         await message.answer(
@@ -1367,7 +1379,7 @@ async def buy_product(callback: CallbackQuery, session: AsyncSession) -> None:
         "🔢 Quantity: 1 pcs\n"
         f"💰 Cost: {money(product_row[0].price) if product_row else 'N/A'}\n\n"
         "Delivered Account:\n"
-        f"<code>{stock_item.payload}</code>",
+        f"<code>{html.escape(stock_item.payload)}</code>",
     )
     await notify_low_stock_if_needed(callback.message, session, product_id, f"#{product_id}")
     await callback.answer("Delivered.")
@@ -1395,14 +1407,15 @@ async def buy_product_text(message: Message, state: FSMContext, session: AsyncSe
         return
 
     await state.clear()
+    await state.update_data(selected_product_id=int(product_id))
     await message.answer(
         "✅ Purchase Successful!\n"
         f"📦 Category: {product_name}\n"
         "🔢 Quantity: 1 pcs\n"
         f"💰 Cost: {money(product_row[0].price) if product_row else 'N/A'}\n\n"
         "Delivered Account:\n"
-        f"<code>{stock_item.payload}</code>",
-        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
+        f"<code>{html.escape(stock_item.payload)}</code>",
+        reply_markup=product_buy_reply_menu(message.from_user.id in get_settings().admin_ids),
     )
     await notify_low_stock_if_needed(message, session, int(product_id), product_name)
 
@@ -1472,6 +1485,7 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
         return
 
     await state.clear()
+    await state.update_data(selected_product_id=int(data["product_id"]))
     delivery_file = build_bulk_delivery_file(stock_items)
     await message.answer_document(
         delivery_file,
@@ -1480,9 +1494,10 @@ async def bulk_buy_finish(message: Message, state: FSMContext, session: AsyncSes
             f"📦 Category: {product_name}\n"
             f"🔢 Quantity: {len(stock_items)} pcs\n"
             f"💰 Cost: {money(float(product_row[0].price) * len(stock_items)) if product_row else 'N/A'}\n\n"
-            "Delivered account file is attached."
+            "Delivered account file is attached.\n\n"
+            "আরও কিনতে Single বা Bulk চাপুন।"
         ),
-        reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
+        reply_markup=product_buy_reply_menu(message.from_user.id in get_settings().admin_ids),
     )
     await notify_low_stock_if_needed(message, session, int(data["product_id"]), product_name)
 

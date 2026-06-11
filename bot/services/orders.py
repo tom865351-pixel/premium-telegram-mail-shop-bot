@@ -201,8 +201,8 @@ async def recent_order_groups(session: AsyncSession, user_id: int, limit: int = 
     groups: dict[tuple[int, float, str, str], dict[str, object]] = {}
     ordered_keys: list[tuple[int, float, str, str]] = []
     for order, product_name, payload in result.all():
-        minute_key = order.created_at.strftime("%Y-%m-%d %H:%M") if order.created_at else ""
-        key = (order.product_id, float(order.amount), order.status.value, minute_key)
+        purchase_key = order.created_at.isoformat() if order.created_at else str(order.id)
+        key = (order.product_id, float(order.amount), order.status.value, purchase_key)
         if key not in groups:
             groups[key] = {
                 "product_name": product_name,
