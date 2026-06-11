@@ -90,11 +90,16 @@ OCR_SPACE_API_URL=https://api.ocr.space/parse/image
 FORCE_JOIN_ENABLED=true
 REQUIRED_CHANNEL_USERNAME=@PremiumXMethod
 REQUIRED_CHANNEL_LINK=https://t.me/PremiumXMethod
+ZINIPAY_TRX_ENABLED=false
+ZINIPAY_API_KEY=
+ZINIPAY_TRX_BASE_URL=https://api.zinipay.com/api/trx
 ```
 
 On Railway, set `DATABASE_URL` as a reference to your PostgreSQL service. If the bot logs show a hostname error for `postgres.railway.internal`, also set `DATABASE_PUBLIC_URL` from the PostgreSQL service and redeploy.
 
 For force-join, add the bot as an admin/member in your required channel so Telegram can verify whether users joined.
+
+Set `ZINIPAY_TRX_ENABLED=true` and `ZINIPAY_API_KEY` to enable direct bKash/Nagad/Rocket TXID verification through ZiniPay. If verification fails, users can still upload a screenshot for manual admin review.
 
 `SEMI_AUTO_DEPOSIT_ENABLED=true` allows trusted small deposits to be approved automatically. For safer personal bKash/Nagad/Rocket use, the bot only auto-approves when the transaction ID is unique, does not look suspicious, the amount is at or below `SEMI_AUTO_DEPOSIT_MAX_AMOUNT`, the user already has at least `SEMI_AUTO_TRUSTED_USER_MIN_APPROVED_DEPOSITS` approved deposit, and today's approved total stays under `SEMI_AUTO_DAILY_USER_LIMIT`. This does not verify personal wallet payments through an official API, so first deposits and risky requests still go to admin review.
 

@@ -23,6 +23,7 @@ from bot.services.products import list_active_products, unsold_stock_count
 from bot.services.replacements import create_replacement_request, recent_replacements
 from bot.services.settings import coupons_enabled
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
+from bot.services.zinipay import verify_and_confirm_transaction, zinipay_ready
 from bot.utils.formatting import clean_support_username, money
 from bot.utils.ui import panel
 
@@ -181,6 +182,7 @@ DEPOSIT_METHOD_LABELS = {
 }
 
 USD_DEPOSIT_METHODS = {"binance", "usdt_trc20", "usdt_bep20"}
+ZINIPAY_DEPOSIT_METHODS = {"bkash", "nagad", "rocket"}
 
 MENU_ALIASES = {
     "🏠 Main Menu": "Main Menu",
@@ -887,6 +889,12 @@ def deposit_rate_note(method: str, amount: float | None = None) -> str:
         f"\n\nUSD/USDT rate: 1 USD = {rate:g} TK\n"
         f"Send approx: {usd_amount:.2f} USD/USDT"
     )
+
+
+def auto_payment_note(method: str) -> str:
+    if method in ZINIPAY_DEPOSIT_METHODS and zinipay_ready():
+        return "\n\nAuto verify is ON. Send the exact TXID after payment; balance will be added automatically if amount matches."
+    return "\n\nAfter sending TXID, upload payment screenshot for admin verification."
 
 
 async def pending_payment_status_text(session: AsyncSession, user_id: int) -> str:
@@ -1610,6 +1618,7 @@ async def deposit_amount(message: Message, state: FSMContext) -> None:
         f"Payment Number/Address: <code>{payment_info or 'Contact support for payment details'}</code>\n\n"
         f"{deposit_rate_note(method, amount)}\n\n"
         "After sending payment, reply with your transaction ID/reference."
+        f"{auto_payment_note(method)}"
     )
 
 
@@ -1627,6 +1636,62 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
             reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
+
+    data = await state.get_data()
+    method = data.get("method")
+    amount = float(data.get("amount", 0))
+    if method in ZINIPAY_DEPOSIT_METHODS and zinipay_ready():
+        await message.answer("Auto payment checking...\n\nPlease wait while ZiniPay verifies your transaction.")
+        result = await verify_and_confirm_transaction(txid, amount)
+        user = await get_or_create_user(session, message.from_user)
+        if result.success:
+            deposit = await create_deposit(
+                session=session,
+                user_id=user.id,
+                amount=amount,
+                method=method,
+                transaction_id=txid,
+                ocr_status="ZiniPay verified",
+                ocr_details=(
+                    f"Provider: {result.provider or DEPOSIT_METHOD_LABELS.get(method, method)}\n"
+                    f"Sender: {result.sender_number or 'Not provided'}\n"
+                    f"Message: {result.message}"
+                ),
+                status=DepositStatus.APPROVED,
+            )
+            await state.clear()
+            for admin_id in get_settings().admin_ids:
+                try:
+                    await message.bot.send_message(
+                        admin_id,
+                        deposit_admin_text(
+                            deposit,
+                            user,
+                            auto_approved=True,
+                            review_reason=(
+                                "ZiniPay TRX API verified and confirmed this transaction.\n"
+                                f"Provider: {result.provider or DEPOSIT_METHOD_LABELS.get(method, method)}\n"
+                                f"Sender: {result.sender_number or 'Not provided'}"
+                            ),
+                        ),
+                    )
+                except Exception:
+                    pass
+            await message.answer(
+                "✅ Deposit Approved Automatically\n\n"
+                f"Amount: {money(amount)}\n"
+                f"Method: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n"
+                f"Transaction ID: <code>{txid}</code>\n\n"
+                "Your balance has been updated.",
+                reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
+            )
+            return
+
+        await message.answer(
+            "Auto verify failed.\n\n"
+            f"Reason: {result.message}\n\n"
+            "Now upload your payment screenshot. Admin will review it manually."
+        )
 
     await state.update_data(transaction_id=txid)
     await state.set_state(DepositForm.screenshot)
