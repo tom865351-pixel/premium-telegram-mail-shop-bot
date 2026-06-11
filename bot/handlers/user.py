@@ -933,15 +933,15 @@ async def pending_payment_status_text(session: AsyncSession, user_id: int) -> st
 async def order_history_text(session: AsyncSession, user_id: int) -> str:
     groups = await recent_order_groups(session, user_id)
     if not groups:
-        return "Order History\n\nNo orders found."
+        return "📦 Order History\n\nএখনও কোনো order পাওয়া যায়নি।"
     blocks = []
     for group in groups:
         items = group.get("items") or []
         delivered = ""
         if items:
-            delivered = "\n\n📩 Delivered:\n" + "\n".join(f"<code>{item}</code>" for item in items[:10])
-            if len(items) > 10:
-                delivered += f"\n...and {len(items) - 10} more"
+            delivered = "\n\n📩 Delivered:\n" + "\n".join(f"<code>{item}</code>" for item in items[:5])
+            if len(items) > 5:
+                delivered += f"\n...and {len(items) - 5} more"
         blocks.append(
             "✅ Purchase Successful!\n"
             f"📦 Category: {group['product_name']}\n"
@@ -949,7 +949,8 @@ async def order_history_text(session: AsyncSession, user_id: int) -> str:
             f"💰 Cost: {money(float(group['total']))}"
             f"{delivered}"
         )
-    return "\n\n".join(blocks)
+    text = "\n\n".join(blocks)
+    return text[:3900] + ("\n\nআরও history দেখতে admin/support এ যোগাযোগ করুন।" if len(text) > 3900 else "")
 
 
 async def deposit_history_text(session: AsyncSession, user_id: int) -> str:
@@ -1380,13 +1381,13 @@ async def bulk_buy_start_text(message: Message, state: FSMContext, session: Asyn
 
 
 @router.message(StateFilter("*"), F.text == "📦 Bulk")
-async def bulk_buy_start_text_current_keyboard(message: Message, state: FSMContext) -> None:
-    await bulk_buy_start_text(message, state)
+async def bulk_buy_start_text_current_keyboard(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await bulk_buy_start_text(message, state, session)
 
 
 @router.message(StateFilter("*"), F.text == "📦 Bulk")
-async def bulk_buy_start_text_emoji_keyboard(message: Message, state: FSMContext) -> None:
-    await bulk_buy_start_text(message, state)
+async def bulk_buy_start_text_emoji_keyboard(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await bulk_buy_start_text(message, state, session)
 
 
 @router.message(BulkBuyForm.quantity)
@@ -1465,6 +1466,16 @@ async def deposit_status_text(message: Message, session: AsyncSession, state: FS
     user = await get_or_create_user(session, message.from_user)
     text = await pending_payment_status_text(session, user.id)
     await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
+
+
+@router.message(StateFilter("*"), F.text.in_({"Order History", "📦 Order History", "ORDER HISTORY"}))
+async def order_history_text_button(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    user = await get_or_create_user(session, message.from_user)
+    await message.answer(
+        await order_history_text(session, user.id),
+        reply_markup=history_reply_menu(message.from_user.id in get_settings().admin_ids),
+    )
 
 
 @router.message(ReplaceForm.details)
