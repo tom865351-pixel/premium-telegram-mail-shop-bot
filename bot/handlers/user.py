@@ -695,7 +695,7 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
 
     if any(word in lowered for word in ("deposit", "top up", "payment", "add balance", "bkash", "nagad", "recharge", "টাকা")):
         await message.answer(
-            panel("ADD BALANCE", "Select your preferred payment method from the keyboard below."),
+            "💳 Deposit\n\n👇 নিচের মেনু থেকে পেমেন্ট মাধ্যম নির্বাচন করুন।",
             reply_markup=deposit_methods_reply_menu(),
         )
         return True
@@ -789,7 +789,7 @@ async def execute_ai_action(
     if action == "deposit":
         await state.clear()
         await message.answer(
-            ai_reply_text(reply or "Deposit method select korun."),
+            ai_reply_text(reply or "👇 নিচের মেনু থেকে পেমেন্ট মাধ্যম নির্বাচন করুন।"),
             reply_markup=deposit_methods_reply_menu(),
         )
         return True
@@ -1080,7 +1080,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
 
     if selected == "Deposit":
         await message.answer(
-            panel("ADD BALANCE", "Select your preferred payment method from the keyboard below."),
+            "💳 Deposit\n\n👇 নিচের মেনু থেকে পেমেন্ট মাধ্যম নির্বাচন করুন।",
             reply_markup=deposit_methods_reply_menu(),
         )
         return
