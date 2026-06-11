@@ -41,7 +41,14 @@ from bot.services.auto_stock import (
     upsert_auto_stock_source,
 )
 from bot.services.stats import admin_stats
-from bot.services.settings import coupons_enabled, set_coupons_enabled
+from bot.services.settings import (
+    coupons_enabled,
+    get_store_notice,
+    maintenance_enabled,
+    set_coupons_enabled,
+    set_maintenance_enabled,
+    set_store_notice,
+)
 from bot.services.orders import all_orders, get_order, order_count, refund_order, sales_report, total_spent
 from bot.services.replacements import pending_replacements, review_replacement
 from bot.services.users import adjust_user_balance, find_user, list_all_users, list_recent_users, set_user_banned, set_user_note, set_user_restricted
@@ -104,6 +111,10 @@ class DepositRejectReasonForm(StatesGroup):
 
 class RefundReasonForm(StatesGroup):
     reason = State()
+
+
+class NoticeForm(StatesGroup):
+    message = State()
 
 
 def _is_admin_document_message(message: Message) -> bool:
@@ -630,6 +641,51 @@ async def reports_text(message: Message, session: AsyncSession, state: FSMContex
         f"Today: {today['orders']} orders | Revenue {money(today['revenue'])} | Refunded {money(today['refunded'])}\n"
         f"7 Days: {week['orders']} orders | Revenue {money(week['revenue'])} | Refunded {money(week['refunded'])}\n"
         f"30 Days: {month['orders']} orders | Revenue {money(month['revenue'])} | Refunded {money(month['refunded'])}",
+        reply_markup=admin_reply_menu(),
+    )
+
+
+@router.message(StateFilter("*"), F.text.in_({"Maintenance", "🛠 Maintenance"}))
+async def maintenance_toggle_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_owner_admin(message.from_user.id):
+        await message.answer("Only owner admin can change maintenance mode.")
+        return
+    enabled = not await maintenance_enabled(session)
+    await set_maintenance_enabled(session, enabled)
+    await log_admin_action(session, message.from_user.id, "maintenance_toggle", details=f"enabled={enabled}")
+    await message.answer(
+        f"Maintenance mode is now {'ON' if enabled else 'OFF'}.",
+        reply_markup=admin_reply_menu(),
+    )
+
+
+@router.message(StateFilter("*"), F.text.in_({"Notice", "📢 Notice"}))
+async def notice_start_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_owner_admin(message.from_user.id):
+        await message.answer("Only owner admin can set notice.")
+        return
+    current = await get_store_notice(session)
+    await state.set_state(NoticeForm.message)
+    await message.answer(
+        "Store Notice\n\n"
+        f"Current notice:\n{current or 'No notice set.'}\n\n"
+        "Send new notice text. Send OFF to clear notice."
+    )
+
+
+@router.message(NoticeForm.message)
+async def notice_finish(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    if not is_owner_admin(message.from_user.id):
+        return
+    text = (message.text or "").strip()
+    notice = "" if text.upper() in {"OFF", "CLEAR", "DELETE"} else text
+    await set_store_notice(session, notice)
+    await state.clear()
+    await log_admin_action(session, message.from_user.id, "notice_update", details=f"enabled={bool(notice)}")
+    await message.answer(
+        "Notice updated." if notice else "Notice cleared.",
         reply_markup=admin_reply_menu(),
     )
 

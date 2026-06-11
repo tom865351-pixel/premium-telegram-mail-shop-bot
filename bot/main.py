@@ -11,7 +11,9 @@ from bot.database import models  # noqa: F401
 from bot.database.session import init_db
 from bot.handlers import setup_routers
 from bot.middlewares.database import DatabaseMiddleware
+from bot.middlewares.anti_spam import AntiSpamMiddleware
 from bot.middlewares.force_join import ForceJoinMiddleware
+from bot.middlewares.maintenance import MaintenanceMiddleware
 from bot.services.auto_stock import auto_stock_worker
 
 
@@ -25,6 +27,10 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dispatcher = Dispatcher()
     dispatcher.update.middleware(DatabaseMiddleware())
+    dispatcher.message.middleware(MaintenanceMiddleware())
+    dispatcher.callback_query.middleware(MaintenanceMiddleware())
+    dispatcher.message.middleware(AntiSpamMiddleware())
+    dispatcher.callback_query.middleware(AntiSpamMiddleware())
     dispatcher.message.middleware(ForceJoinMiddleware())
     dispatcher.callback_query.middleware(ForceJoinMiddleware())
     dispatcher.include_router(setup_routers())

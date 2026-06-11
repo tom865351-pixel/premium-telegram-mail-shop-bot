@@ -3,7 +3,15 @@ from datetime import datetime, time
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.config import get_settings
 from bot.database.models import Deposit, DepositStatus, User
+
+
+def deposit_bonus(amount: float) -> float:
+    settings = get_settings()
+    if settings.deposit_bonus_percent <= 0 or amount < settings.deposit_bonus_threshold:
+        return 0.0
+    return round(float(amount) * settings.deposit_bonus_percent / 100, 2)
 
 
 async def create_deposit(
@@ -31,7 +39,7 @@ async def create_deposit(
         deposit.reviewed_at = datetime.utcnow()
         user = await session.get(User, user_id)
         if user:
-            user.balance = float(user.balance) + float(amount)
+            user.balance = float(user.balance) + float(amount) + deposit_bonus(float(amount))
     session.add(deposit)
     await session.commit()
     await session.refresh(deposit)
@@ -106,7 +114,7 @@ async def review_deposit(session: AsyncSession, deposit_id: int, approve: bool) 
     if approve:
         user = await session.get(User, deposit.user_id)
         if user:
-            user.balance = float(user.balance) + float(deposit.amount)
+            user.balance = float(user.balance) + float(deposit.amount) + deposit_bonus(float(deposit.amount))
     await session.commit()
     await session.refresh(deposit)
     return deposit

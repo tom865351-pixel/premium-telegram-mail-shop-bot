@@ -24,6 +24,7 @@ def admin_reply_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="👥 Members"), KeyboardButton(text="📋 All Members")],
             [KeyboardButton(text="📣 Broadcast"), KeyboardButton(text="📈 Reports")],
             [KeyboardButton(text="🔎 Admin Search"), KeyboardButton(text="📤 Export Data")],
+            [KeyboardButton(text="🛠 Maintenance"), KeyboardButton(text="📢 Notice")],
             [KeyboardButton(text="🏷 Coupons"), KeyboardButton(text="📊 Stats")],
             [KeyboardButton(text="🏠 Main Menu")],
         ],

@@ -9,6 +9,31 @@ from bot.database.models import Order, OrderStatus, Product, ReferralReward, Sto
 from bot.services.products import reserve_stock_item, reserve_stock_items
 
 
+async def vip_discount_percent(session: AsyncSession, user_id: int) -> float:
+    settings = get_settings()
+    spent = float(
+        await session.scalar(
+            select(func.coalesce(func.sum(Order.amount), 0)).where(
+                Order.user_id == user_id,
+                Order.status == OrderStatus.COMPLETED,
+            )
+        )
+        or 0
+    )
+    if spent >= settings.vip_gold_spend:
+        return float(settings.vip_gold_discount_percent)
+    if spent >= settings.vip_silver_spend:
+        return float(settings.vip_silver_discount_percent)
+    return 0.0
+
+
+async def vip_price(session: AsyncSession, user_id: int, price: float) -> float:
+    discount = await vip_discount_percent(session, user_id)
+    if discount <= 0:
+        return round(float(price), 2)
+    return round(float(price) * (100 - discount) / 100, 2)
+
+
 async def purchase_product(session: AsyncSession, user: User, product_id: int) -> tuple[bool, str, StockItem | None]:
     if getattr(user, "is_banned", False):
         return False, "Your account is banned. Please contact support.", None
@@ -19,7 +44,7 @@ async def purchase_product(session: AsyncSession, user: User, product_id: int) -
     if not product or not product.is_active:
         return False, "Product is unavailable.", None
 
-    price = float(product.price)
+    price = await vip_price(session, user.id, float(product.price))
     if float(user.balance) < price:
         return False, "Insufficient balance. Please deposit first.", None
 
@@ -72,7 +97,7 @@ async def purchase_product_bulk(
     if not product or not product.is_active:
         return False, "Product is unavailable.", []
 
-    unit_price = float(product.price)
+    unit_price = await vip_price(session, user.id, float(product.price))
     total_price = round(unit_price * quantity, 2)
     if float(user.balance) < total_price:
         return False, f"Insufficient balance. Need {total_price:.2f}.", []

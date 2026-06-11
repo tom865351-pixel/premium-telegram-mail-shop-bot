@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 from aiogram import F, Router
@@ -16,12 +17,12 @@ from bot.middlewares.force_join import JOIN_CHECK_CALLBACK, force_join_keyboard,
 from bot.services.coupons import redeem_coupon
 from bot.database.models import DepositStatus, Order
 from bot.services.ai import ask_gemini_agent
-from bot.services.deposits import approved_deposit_count, create_deposit, deposited_today, pending_deposits_for_user, recent_deposits, txid_exists
+from bot.services.deposits import approved_deposit_count, create_deposit, deposit_bonus, deposited_today, pending_deposits_for_user, recent_deposits, txid_exists
 from bot.services.ocr import analyze_payment_screenshot
-from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_order_groups, spent_today, total_spent
-from bot.services.products import list_active_products, unsold_stock_count
+from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_order_groups, spent_today, total_spent, vip_discount_percent
+from bot.services.products import list_active_products, search_products, unsold_stock_count
 from bot.services.replacements import create_replacement_request, recent_replacements
-from bot.services.settings import coupons_enabled
+from bot.services.settings import coupons_enabled, get_store_notice
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.services.zinipay import verify_and_confirm_transaction, zinipay_ready
 from bot.utils.formatting import clean_support_username, money
@@ -103,6 +104,10 @@ RESERVED_REPLY_TEXTS = {
     "Broadcast",
     "📈 Reports",
     "Reports",
+    "🛠 Maintenance",
+    "Maintenance",
+    "📢 Notice",
+    "Notice",
     "🧾 Deposit Status",
     "🧾 Status",
     "Status",
@@ -254,7 +259,7 @@ MENU_ALIASES = {
     "📊 Stats": "Stats",
     "STATS": "Stats",
 }
-ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats", "Members"}
+ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats", "Members", "Maintenance", "Notice"}
 GLOBAL_MENU_TEXTS = {
     "🏠 Main Menu",
     "🏠 Menu",
@@ -637,10 +642,13 @@ async def profile_text(session: AsyncSession, user: object) -> str:
     today_deposit = await deposited_today(session, user.id)
     today_spent = await spent_today(session, user.id)
     lifetime_spent = await total_spent(session, user.id)
+    vip_discount = await vip_discount_percent(session, user.id)
+    vip_rank = "Gold" if vip_discount >= get_settings().vip_gold_discount_percent and vip_discount > 0 else "Silver" if vip_discount > 0 else "Regular"
     return (
         f"👤 Name: {user.first_name or 'Unknown'}\n"
         f"🆔 User ID: {user.telegram_id}\n"
         f"👤 Username: {username}\n"
+        f"⭐ VIP: {vip_rank} ({vip_discount:g}% discount)\n"
         f"💰 Balance: {money(user.balance)}\n"
         f"💵 Deposited today: {money(today_deposit)}\n"
         f"🧾 Spent today: {money(today_spent)}\n"
@@ -863,7 +871,10 @@ async def send_menu(message: Message, session: AsyncSession, referral_code: str 
     if user.is_banned and message.from_user.id not in settings.admin_ids:
         await message.answer("Your account is banned. Please contact support.")
         return
+    notice = await get_store_notice(session)
     text = await profile_text(session, user)
+    if notice:
+        text = f"📢 Notice\n{notice}\n\n{text}"
     await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
 
 
@@ -895,6 +906,11 @@ def auto_payment_note(method: str) -> str:
     if method in ZINIPAY_DEPOSIT_METHODS and zinipay_ready():
         return "\n\nAuto verify is ON. Send the exact TXID after payment; balance will be added automatically if amount matches."
     return "\n\nAfter sending TXID, upload payment screenshot for admin verification."
+
+
+def deposit_bonus_line(amount: float) -> str:
+    bonus = deposit_bonus(float(amount))
+    return f"Bonus: {money(bonus)}\n" if bonus > 0 else ""
 
 
 async def pending_payment_status_text(session: AsyncSession, user_id: int) -> str:
@@ -1459,6 +1475,18 @@ async def replace_details(message: Message, state: FSMContext, session: AsyncSes
         if not order or order.user_id != user.id:
             await message.answer("Order not found for your account. Please check the order ID or send 0 if you do not know it.")
             return
+        warranty_hours = get_settings().replacement_warranty_hours
+        if warranty_hours > 0 and order.created_at:
+            created_at = order.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - created_at > timedelta(hours=warranty_hours):
+                await state.clear()
+                await message.answer(
+                    f"Replacement warranty expired.\n\nReplacement allowed within {warranty_hours} hours of purchase.",
+                    reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
+                )
+                return
     await state.update_data(order_id=order_id, quantity=quantity, problem=problem)
     await state.set_state(ReplaceForm.proof)
     await message.answer(
@@ -1680,6 +1708,7 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
             await message.answer(
                 "✅ Deposit Approved Automatically\n\n"
                 f"Amount: {money(amount)}\n"
+                f"{deposit_bonus_line(amount)}"
                 f"Method: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n"
                 f"Transaction ID: <code>{txid}</code>\n\n"
                 "Your balance has been updated.",
@@ -1785,6 +1814,7 @@ async def _process_deposit_screenshot(message: Message, state: FSMContext, sessi
             "Deposit Approved\n\n"
             f"Request ID: #{deposit.id}\n"
             f"Amount: {money(deposit.amount)}\n"
+            f"{deposit_bonus_line(float(deposit.amount))}"
             f"Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n"
             f"Transaction ID: <code>{deposit.transaction_id}</code>\n\n"
             "Your balance has been updated automatically.",
@@ -2007,12 +2037,23 @@ async def product_name_text(message: Message, session: AsyncSession, state: FSMC
     if await send_product_detail_message(message, session, state, message.text):
         return
 
+    query = (message.text or "").strip()
+    if len(query) >= 2:
+        matches = await search_products(session, query, limit=12)
+        active_matches = [(product, stock) for product, stock in matches if product.is_active]
+        if active_matches:
+            await message.answer(
+                panel("PRODUCT SEARCH", f"Found {len(active_matches)} matching product(s).", "Select from the keyboard below."),
+                reply_markup=products_reply_menu(active_matches, message.from_user.id in get_settings().admin_ids),
+            )
+            return
+
     settings = get_settings()
     if not settings.ai_enabled:
         return
 
     user = await get_or_create_user(session, message.from_user)
-    text = (message.text or "").strip()
+    text = query
     if not text:
         return
 

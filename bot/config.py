@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     zinipay_trx_enabled: bool = Field(default=False, alias="ZINIPAY_TRX_ENABLED")
     zinipay_api_key: str | None = Field(default=None, alias="ZINIPAY_API_KEY")
     zinipay_trx_base_url: str = Field(default="https://api.zinipay.com/v1/trx", alias="ZINIPAY_TRX_BASE_URL")
+    vip_silver_spend: float = Field(default=1000, alias="VIP_SILVER_SPEND")
+    vip_silver_discount_percent: float = Field(default=2, alias="VIP_SILVER_DISCOUNT_PERCENT")
+    vip_gold_spend: float = Field(default=5000, alias="VIP_GOLD_SPEND")
+    vip_gold_discount_percent: float = Field(default=5, alias="VIP_GOLD_DISCOUNT_PERCENT")
+    deposit_bonus_threshold: float = Field(default=1000, alias="DEPOSIT_BONUS_THRESHOLD")
+    deposit_bonus_percent: float = Field(default=0, alias="DEPOSIT_BONUS_PERCENT")
+    replacement_warranty_hours: int = Field(default=24, alias="REPLACEMENT_WARRANTY_HOURS")
+    anti_spam_seconds: float = Field(default=0.8, alias="ANTI_SPAM_SECONDS")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
