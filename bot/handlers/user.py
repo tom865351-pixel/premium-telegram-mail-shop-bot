@@ -1,3 +1,4 @@
+import html
 import re
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -424,6 +425,35 @@ def build_bulk_delivery_file(stock_items: list[object]) -> BufferedInputFile:
     return BufferedInputFile(output.read(), filename="bulk_accounts.xlsx")
 
 
+def build_order_history_file(groups: list[dict[str, object]]) -> BufferedInputFile | None:
+    total_items = sum(len(group.get("items") or []) for group in groups)
+    if total_items <= 0:
+        return None
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Order History"
+    worksheet.append(["Product", "Quantity", "Cost", "Delivered Account"])
+    for group in groups:
+        items = group.get("items") or []
+        for item in items:
+            worksheet.append([
+                group.get("product_name", ""),
+                group.get("quantity", 0),
+                float(group.get("total", 0)),
+                item,
+            ])
+    worksheet.column_dimensions["A"].width = 28
+    worksheet.column_dimensions["B"].width = 12
+    worksheet.column_dimensions["C"].width = 14
+    worksheet.column_dimensions["D"].width = 72
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return BufferedInputFile(output.read(), filename=f"order_history_{total_items}_pcs.xlsx")
+
+
 def user_label(user: object) -> str:
     username = f"@{user.username}" if getattr(user, "username", None) else "No username"
     name = getattr(user, "first_name", None) or "Unknown"
@@ -705,8 +735,7 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
         return True
 
     if any(word in lowered for word in ("order", "history", "purchase", "invoice", "অর্ডার")):
-        response = await order_history_text(session, user.id)
-        await message.answer(response, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
+        await send_order_history(message, session, user.id, await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if any(word in lowered for word in ("status", "deposit status", "pending", "approved")):
@@ -807,8 +836,7 @@ async def execute_ai_action(
             await state.set_state(AIHelpForm.message)
         else:
             await state.clear()
-        text = await order_history_text(session, user.id)
-        await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
+        await send_order_history(message, session, user.id, await dynamic_main_reply_menu(session, message.from_user.id))
         return True
 
     if action == "deposit_status":
@@ -939,18 +967,32 @@ async def order_history_text(session: AsyncSession, user_id: int) -> str:
         items = group.get("items") or []
         delivered = ""
         if items:
-            delivered = "\n\n📩 Delivered:\n" + "\n".join(f"<code>{item}</code>" for item in items[:5])
+            delivered = "\n\n📩 Delivered:\n" + "\n".join(f"<code>{html.escape(str(item))}</code>" for item in items[:5])
             if len(items) > 5:
                 delivered += f"\n...and {len(items) - 5} more"
         blocks.append(
             "✅ Purchase Successful!\n"
-            f"📦 Category: {group['product_name']}\n"
+            f"📦 Category: {html.escape(str(group['product_name']))}\n"
             f"🔢 Quantity: {group['quantity']} pcs\n"
             f"💰 Cost: {money(float(group['total']))}"
             f"{delivered}"
         )
     text = "\n\n".join(blocks)
     return text[:3900] + ("\n\nআরও history দেখতে admin/support এ যোগাযোগ করুন।" if len(text) > 3900 else "")
+
+
+async def send_order_history(message: Message, session: AsyncSession, user_id: int, reply_markup=None) -> None:
+    groups = await recent_order_groups(session, user_id)
+    if not groups:
+        await message.answer("📦 Order History\n\nএখনও কোনো order পাওয়া যায়নি।", reply_markup=reply_markup)
+        return
+    await message.answer(await order_history_text(session, user_id), reply_markup=reply_markup)
+    history_file = build_order_history_file(groups)
+    if history_file:
+        await message.answer_document(
+            history_file,
+            caption="📁 আপনার order history file।\nসব delivered account এই Excel file-এ দেওয়া আছে।",
+        )
 
 
 async def deposit_history_text(session: AsyncSession, user_id: int) -> str:
@@ -1091,8 +1133,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         return
 
     if selected == "Orders":
-        text = await order_history_text(session, user.id)
-        await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
+        await send_order_history(message, session, user.id, await dynamic_main_reply_menu(session, message.from_user.id))
         return
 
     if selected == "History":
@@ -1110,10 +1151,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         return
 
     if selected == "Order History":
-        await message.answer(
-            await order_history_text(session, user.id),
-            reply_markup=history_reply_menu(message.from_user.id in settings.admin_ids),
-        )
+        await send_order_history(message, session, user.id, history_reply_menu(message.from_user.id in settings.admin_ids))
         return
 
     if selected == "Deposit Status":
@@ -1447,17 +1485,15 @@ async def direct_quantity_after_product(message: Message, state: FSMContext, ses
 @router.callback_query(F.data == "orders")
 async def orders(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_or_create_user(session, callback.from_user)
-    text = await order_history_text(session, user.id)
-    await callback.message.edit_text(text)
-    await callback.message.answer("Menu", reply_markup=await dynamic_main_reply_menu(session, callback.from_user.id))
+    await callback.message.edit_text("📦 Order History")
+    await send_order_history(callback.message, session, user.id, await dynamic_main_reply_menu(session, callback.from_user.id))
     await callback.answer()
 
 
 @router.message(StateFilter(None), F.text == "Orders")
 async def orders_text(message: Message, session: AsyncSession) -> None:
     user = await get_or_create_user(session, message.from_user)
-    text = await order_history_text(session, user.id)
-    await message.answer(text, reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
+    await send_order_history(message, session, user.id, await dynamic_main_reply_menu(session, message.from_user.id))
 
 
 @router.message(StateFilter("*"), F.text.in_({"Status", "🧾 Status", "Deposit Status", "🧾 Deposit Status"}))
@@ -1472,10 +1508,7 @@ async def deposit_status_text(message: Message, session: AsyncSession, state: FS
 async def order_history_text_button(message: Message, session: AsyncSession, state: FSMContext) -> None:
     await state.clear()
     user = await get_or_create_user(session, message.from_user)
-    await message.answer(
-        await order_history_text(session, user.id),
-        reply_markup=history_reply_menu(message.from_user.id in get_settings().admin_ids),
-    )
+    await send_order_history(message, session, user.id, history_reply_menu(message.from_user.id in get_settings().admin_ids))
 
 
 @router.message(ReplaceForm.details)

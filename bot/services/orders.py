@@ -196,7 +196,7 @@ async def recent_order_groups(session: AsyncSession, user_id: int, limit: int = 
         .join(StockItem, StockItem.id == Order.stock_item_id)
         .where(Order.user_id == user_id)
         .order_by(Order.id.desc())
-        .limit(500)
+        .limit(2000)
     )
     groups: dict[tuple[int, float, str, str], dict[str, object]] = {}
     ordered_keys: list[tuple[int, float, str, str]] = []
@@ -216,8 +216,7 @@ async def recent_order_groups(session: AsyncSession, user_id: int, limit: int = 
             ordered_keys.append(key)
         groups[key]["quantity"] = int(groups[key]["quantity"]) + 1
         groups[key]["total"] = float(groups[key]["total"]) + float(order.amount)
-        if len(groups[key]["items"]) < 20:
-            groups[key]["items"].append(payload)
+        groups[key]["items"].append(payload)
     return [groups[key] for key in ordered_keys[:limit]]
 
 
