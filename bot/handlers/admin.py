@@ -47,7 +47,9 @@ from bot.services.settings import (
     maintenance_enabled,
     set_coupons_enabled,
     set_maintenance_enabled,
+    set_sell_enabled,
     set_store_notice,
+    sell_enabled,
 )
 from bot.services.orders import all_orders, get_order, order_count, refund_order, sales_report, total_spent
 from bot.services.replacements import pending_replacements, review_replacement
@@ -675,6 +677,21 @@ async def notice_start_text(message: Message, session: AsyncSession, state: FSMC
     )
 
 
+@router.message(StateFilter("*"), F.text.in_({"Sell Toggle", "💼 Sell Toggle"}))
+async def sell_toggle_text(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    await state.clear()
+    if not is_owner_admin(message.from_user.id):
+        await message.answer("Only owner admin can change sell option.")
+        return
+    enabled = not await sell_enabled(session)
+    await set_sell_enabled(session, enabled)
+    await log_admin_action(session, message.from_user.id, "sell_toggle", details=f"enabled={enabled}")
+    await message.answer(
+        f"Sell option is now {'ON' if enabled else 'OFF'}.",
+        reply_markup=admin_reply_menu(),
+    )
+
+
 @router.message(NoticeForm.message)
 async def notice_finish(message: Message, session: AsyncSession, state: FSMContext) -> None:
     if not is_owner_admin(message.from_user.id):
@@ -871,7 +888,8 @@ async def all_members_text(message: Message, state: FSMContext, session: AsyncSe
     if not is_admin(message.from_user.id):
         await message.answer("You are not authorized.")
         return
-    users = _page_slice(await list_all_users(session), page=1, per_page=10)
+    all_users = await list_all_users(session)
+    users = _page_slice(all_users, page=1, per_page=10)
     if not users:
         await message.answer("Members\n\nNo members found.", reply_markup=admin_reply_menu())
         return
@@ -885,7 +903,7 @@ async def all_members_text(message: Message, state: FSMContext, session: AsyncSe
         "All Members\n\n"
         + "\n".join(lines)
         + "\n\nSelect a member from the keyboard below.",
-        reply_markup=members_reply_menu(users),
+        reply_markup=members_reply_menu(users, page=1, has_next=len(all_users) > 10),
     )
 
 
@@ -896,7 +914,8 @@ async def members_page_text(message: Message, state: FSMContext, session: AsyncS
         await message.answer("You are not authorized.")
         return
     page = _page_from_text(message.text, "Members") or 1
-    users = _page_slice(await list_all_users(session), page=page, per_page=10)
+    all_users = await list_all_users(session)
+    users = _page_slice(all_users, page=page, per_page=10)
     if not users:
         await message.answer("No members on this page.", reply_markup=paged_reply_menu("Members", page))
         return
@@ -906,9 +925,8 @@ async def members_page_text(message: Message, state: FSMContext, session: AsyncS
         lines.append(f"#{user.id} | {user.first_name or 'Unknown'} | {username} | TG: {user.telegram_id} | {money(user.balance)} | {_member_status(user)}")
     await message.answer(
         f"All Members - Page {page}\n\n" + "\n".join(lines),
-        reply_markup=members_reply_menu(users),
+        reply_markup=members_reply_menu(users, page=page, has_next=len(all_users) > page * 10),
     )
-    await message.answer("Navigate member pages.", reply_markup=paged_reply_menu("Members", page))
 
 
 @router.message(StateFilter("*"), F.text.func(_is_member_selection))

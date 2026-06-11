@@ -22,7 +22,7 @@ from bot.services.ocr import analyze_payment_screenshot
 from bot.services.orders import order_count, purchase_product, purchase_product_bulk, recent_order_groups, spent_today, total_spent, vip_discount_percent
 from bot.services.products import list_active_products, search_products, unsold_stock_count
 from bot.services.replacements import create_replacement_request, recent_replacements
-from bot.services.settings import coupons_enabled, get_store_notice
+from bot.services.settings import coupons_enabled, get_store_notice, sell_enabled
 from bot.services.users import get_or_create_user, get_user_by_telegram_id
 from bot.services.zinipay import verify_and_confirm_transaction, zinipay_ready
 from bot.utils.formatting import clean_support_username, money
@@ -108,6 +108,8 @@ RESERVED_REPLY_TEXTS = {
     "Maintenance",
     "📢 Notice",
     "Notice",
+    "💼 Sell Toggle",
+    "Sell Toggle",
     "🧾 Deposit Status",
     "🧾 Status",
     "Status",
@@ -163,18 +165,10 @@ DEPOSIT_METHOD_TEXTS = {
     "🟡 Binance": "binance",
     "🟡 Binance": "binance",
     "Binance": "binance",
-    "💵 USDT TRC20": "usdt_trc20",
-    "TRC20": "usdt_trc20",
-    "USDT TRC20": "usdt_trc20",
-    "💵 USDT BEP20": "usdt_bep20",
-    "BEP20": "usdt_bep20",
-    "USDT BEP20": "usdt_bep20",
     "📱 bKash": "bkash",
     "bKash": "bkash",
     "📱 Nagad": "nagad",
     "Nagad": "nagad",
-    "🚀 Rocket": "rocket",
-    "Rocket": "rocket",
 }
 
 DEPOSIT_METHOD_LABELS = {
@@ -259,7 +253,7 @@ MENU_ALIASES = {
     "📊 Stats": "Stats",
     "STATS": "Stats",
 }
-ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats", "Members", "Maintenance", "Notice"}
+ADMIN_MENU_TEXTS = {"Admin Panel", "Products", "Add Product", "Add Stock", "Deposits", "Coupons", "Stats", "Members", "Maintenance", "Notice", "Sell Toggle"}
 GLOBAL_MENU_TEXTS = {
     "🏠 Main Menu",
     "🏠 Menu",
@@ -644,15 +638,23 @@ async def profile_text(session: AsyncSession, user: object) -> str:
     lifetime_spent = await total_spent(session, user.id)
     vip_discount = await vip_discount_percent(session, user.id)
     vip_rank = "Gold" if vip_discount >= get_settings().vip_gold_discount_percent and vip_discount > 0 else "Silver" if vip_discount > 0 else "Regular"
+    status = "Restricted" if getattr(user, "is_restricted", False) else "Banned" if getattr(user, "is_banned", False) else "Active"
+    orders = await order_count(session, user.id)
     return (
-        f"👤 Name: {user.first_name or 'Unknown'}\n"
-        f"🆔 User ID: {user.telegram_id}\n"
-        f"👤 Username: {username}\n"
-        f"⭐ VIP: {vip_rank} ({vip_discount:g}% discount)\n"
+        "👤 Account Profile\n"
+        "━━━━━━━━━━━━━━━━\n"
+        f"🧑 Name: {user.first_name or 'Unknown'}\n"
+        f"🆔 Telegram ID: <code>{user.telegram_id}</code>\n"
+        f"🔗 Username: {username}\n"
+        f"✅ Status: {status}\n\n"
         f"💰 Balance: {money(user.balance)}\n"
-        f"💵 Deposited today: {money(today_deposit)}\n"
-        f"🧾 Spent today: {money(today_spent)}\n"
-        f"📦 Total spent: {money(lifetime_spent)}"
+        f"⭐ VIP Level: {vip_rank}\n"
+        f"🎁 Discount: {vip_discount:g}%\n\n"
+        "📊 Today\n"
+        f"💵 Deposited: {money(today_deposit)}\n"
+        f"🧾 Spent: {money(today_spent)}\n\n"
+        f"📦 Total Orders: {orders}\n"
+        f"💎 Lifetime Spent: {money(lifetime_spent)}"
     )
 
 
@@ -667,6 +669,7 @@ async def dynamic_main_reply_menu(session: AsyncSession, telegram_id: int):
     return main_reply_menu(
         telegram_id in get_settings().admin_ids,
         show_coupon=await coupons_enabled(session),
+        show_sell=await sell_enabled(session),
     )
 
 
@@ -685,7 +688,7 @@ async def answer_ai_intent(message: Message, session: AsyncSession, state: FSMCo
             await message.answer("No products are available right now.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
         else:
             await message.answer(
-                panel("PRODUCT CATALOG", "Select a product from the keyboard below."),
+                "🛍 পণ্য বেছে নিন",
                 reply_markup=products_reply_menu(product_rows, is_admin),
             )
         return True
@@ -904,13 +907,17 @@ def deposit_rate_note(method: str, amount: float | None = None) -> str:
 
 def auto_payment_note(method: str) -> str:
     if method in ZINIPAY_DEPOSIT_METHODS and zinipay_ready():
-        return "\n\nAuto verify is ON. Send the exact TXID after payment; balance will be added automatically if amount matches."
-    return "\n\nAfter sending TXID, upload payment screenshot for admin verification."
+        return "\n\n✅ পেমেন্ট করার পর সঠিক Transaction ID পাঠান।\n🔐 তথ্য মিললে আপনার ব্যালেন্স স্বয়ংক্রিয়ভাবে যোগ হবে।"
+    return "\n\n✅ পেমেন্ট করার পর Transaction ID পাঠান।\n📸 এরপর পেমেন্টের screenshot আপলোড করুন।"
 
 
 def deposit_bonus_line(amount: float) -> str:
     bonus = deposit_bonus(float(amount))
     return f"Bonus: {money(bonus)}\n" if bonus > 0 else ""
+
+
+def support_line() -> str:
+    return f"☎️ সমস্যা হলে Support-এ মেসেজ করুন: @{clean_support_username(get_settings().support_username)}"
 
 
 async def pending_payment_status_text(session: AsyncSession, user_id: int) -> str:
@@ -929,11 +936,18 @@ async def order_history_text(session: AsyncSession, user_id: int) -> str:
         return "Order History\n\nNo orders found."
     blocks = []
     for group in groups:
+        items = group.get("items") or []
+        delivered = ""
+        if items:
+            delivered = "\n\n📩 Delivered:\n" + "\n".join(f"<code>{item}</code>" for item in items[:10])
+            if len(items) > 10:
+                delivered += f"\n...and {len(items) - 10} more"
         blocks.append(
             "✅ Purchase Successful!\n"
             f"📦 Category: {group['product_name']}\n"
             f"🔢 Quantity: {group['quantity']} pcs\n"
             f"💰 Cost: {money(float(group['total']))}"
+            f"{delivered}"
         )
     return "\n\n".join(blocks)
 
@@ -1018,7 +1032,7 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
             )
             return
         await message.answer(
-            panel("PRODUCT CATALOG", "Select a product from the keyboard below."),
+            "🛍 পণ্য বেছে নিন",
             reply_markup=products_reply_menu(product_rows, message.from_user.id in settings.admin_ids),
         )
         return
@@ -1039,6 +1053,9 @@ async def global_menu_text(message: Message, session: AsyncSession, state: FSMCo
         return
 
     if selected == "Sell":
+        if not await sell_enabled(session):
+            await message.answer("💼 Sell option currently বন্ধ আছে.", reply_markup=await dynamic_main_reply_menu(session, message.from_user.id))
+            return
         await state.set_state(SellForm.details)
         await message.answer(
             "Sell Request\n\n"
@@ -1186,7 +1203,7 @@ async def products(callback: CallbackQuery, session: AsyncSession) -> None:
         await callback.message.answer("Menu", reply_markup=await dynamic_main_reply_menu(session, callback.from_user.id))
     else:
         await callback.message.answer(
-            "Product Catalog\n\nSelect a product from the keyboard below.",
+            "🛍 পণ্য বেছে নিন",
             reply_markup=products_reply_menu(product_rows, callback.from_user.id in get_settings().admin_ids),
         )
         await callback.message.edit_text("Products")
@@ -1203,7 +1220,7 @@ async def products_text(message: Message, session: AsyncSession) -> None:
         )
         return
     await message.answer(
-        "Product Catalog\n\nSelect a product from the keyboard below.",
+        "🛍 পণ্য বেছে নিন",
         reply_markup=products_reply_menu(product_rows, message.from_user.id in get_settings().admin_ids),
     )
 
@@ -1565,15 +1582,15 @@ async def replace_proof_text(message: Message, state: FSMContext, session: Async
 
 @router.callback_query(F.data == "deposit")
 async def deposit(callback: CallbackQuery) -> None:
-    await callback.message.edit_text("Deposit Funds\n\nSelect your preferred payment method.")
-    await callback.message.answer("Payment methods", reply_markup=deposit_methods_reply_menu())
+    await callback.message.edit_text("💳 Deposit\n\nপেমেন্ট মাধ্যম নির্বাচন করুন।")
+    await callback.message.answer("👇 নিচের মেনু থেকে একটি মাধ্যম বেছে নিন।", reply_markup=deposit_methods_reply_menu())
     await callback.answer()
 
 
 @router.message(StateFilter(None), F.text == "Deposit")
 async def deposit_text(message: Message) -> None:
     await message.answer(
-        "Deposit Funds\n\nSelect your preferred payment method from the keyboard below.",
+        "💳 Deposit\n\n👇 নিচের মেনু থেকে একটি পেমেন্ট মাধ্যম বেছে নিন।",
         reply_markup=deposit_methods_reply_menu(),
     )
 
@@ -1584,8 +1601,8 @@ async def deposit_method(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(method=method)
     await state.set_state(DepositForm.amount)
     await callback.message.edit_text(
-        f"Payment Method: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n\n"
-        "Enter the amount you want to deposit in TK."
+        f"💳 পেমেন্ট মাধ্যম: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n\n"
+        "💵 কত টাকা deposit করতে চান লিখুন।"
         f"{deposit_rate_note(method)}"
     )
     await callback.answer()
@@ -1602,8 +1619,8 @@ async def deposit_method_text(message: Message, state: FSMContext, session: Asyn
     await state.update_data(method=method)
     await state.set_state(DepositForm.amount)
     await message.answer(
-        f"Payment Method: {DEPOSIT_METHOD_LABELS[method]}\n\n"
-        "Enter the amount you want to deposit in TK."
+        f"💳 পেমেন্ট মাধ্যম: {DEPOSIT_METHOD_LABELS[method]}\n\n"
+        "💵 কত টাকা deposit করতে চান লিখুন।"
         f"{deposit_rate_note(method)}"
     )
 
@@ -1620,10 +1637,10 @@ async def deposit_amount(message: Message, state: FSMContext) -> None:
     try:
         amount = float(message.text)
     except (TypeError, ValueError):
-        await message.answer("Please enter a valid numeric amount.")
+        await message.answer("⚠️ অনুগ্রহ করে সঠিক amount লিখুন। উদাহরণ: 500")
         return
     if amount < settings.min_deposit:
-        await message.answer(f"Minimum deposit amount is {money(settings.min_deposit)}.")
+        await message.answer(f"⚠️ Minimum deposit amount: {money(settings.min_deposit)}")
         return
 
     data = await state.get_data()
@@ -1640,12 +1657,11 @@ async def deposit_amount(message: Message, state: FSMContext) -> None:
     await state.update_data(amount=amount)
     await state.set_state(DepositForm.transaction_id)
     await message.answer(
-        "Payment Instructions\n\n"
-        f"Amount: {money(amount)}\n"
-        f"Method: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n"
-        f"Payment Number/Address: <code>{payment_info or 'Contact support for payment details'}</code>\n\n"
+        "💳 Payment Instructions\n\n"
+        f"💵 Amount: {money(amount)}\n"
+        f"📌 Method: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n"
+        f"📍 Payment Number/Address: <code>{payment_info or 'Support-এ যোগাযোগ করুন'}</code>\n"
         f"{deposit_rate_note(method, amount)}\n\n"
-        "After sending payment, reply with your transaction ID/reference."
         f"{auto_payment_note(method)}"
     )
 
@@ -1654,13 +1670,14 @@ async def deposit_amount(message: Message, state: FSMContext) -> None:
 async def deposit_transaction(message: Message, state: FSMContext, session: AsyncSession) -> None:
     txid = message.text.strip()
     if len(txid) < 4:
-        await message.answer("Transaction ID is too short. Please send a valid transaction ID/reference.")
+        await message.answer("⚠️ Transaction ID খুব ছোট। অনুগ্রহ করে সঠিক TXID পাঠান।")
         return
     if await txid_exists(session, txid):
         await state.clear()
         await message.answer(
-            "Duplicate Transaction ID\n\n"
-            "This transaction ID has already been submitted. If this is a mistake, please contact support.",
+            "⚠️ Duplicate Transaction ID\n\n"
+            "এই TXID আগে submit করা হয়েছে। ভুল হলে support-এ যোগাযোগ করুন।\n\n"
+            f"{support_line()}",
             reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
@@ -1669,7 +1686,7 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
     method = data.get("method")
     amount = float(data.get("amount", 0))
     if method in ZINIPAY_DEPOSIT_METHODS and zinipay_ready():
-        await message.answer("Auto payment checking...\n\nPlease wait while ZiniPay verifies your transaction.")
+        await message.answer("⏳ পেমেন্ট যাচাই করা হচ্ছে...\n\nঅনুগ্রহ করে একটু অপেক্ষা করুন।")
         result = await verify_and_confirm_transaction(txid, amount)
         user = await get_or_create_user(session, message.from_user)
         if result.success:
@@ -1706,34 +1723,35 @@ async def deposit_transaction(message: Message, state: FSMContext, session: Asyn
                 except Exception:
                     pass
             await message.answer(
-                "✅ Deposit Approved Automatically\n\n"
-                f"Amount: {money(amount)}\n"
+                "✅ Deposit Approved\n\n"
+                f"💵 Amount: {money(amount)}\n"
                 f"{deposit_bonus_line(amount)}"
-                f"Method: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n"
-                f"Transaction ID: <code>{txid}</code>\n\n"
-                "Your balance has been updated.",
+                f"📌 Method: {DEPOSIT_METHOD_LABELS.get(method, method.upper())}\n"
+                f"🧾 TXID: <code>{txid}</code>\n\n"
+                "💰 আপনার ব্যালেন্স যোগ করা হয়েছে।",
                 reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
             )
             return
 
         await message.answer(
-            "Auto verify failed.\n\n"
-            f"Reason: {result.message}\n\n"
-            "Now upload your payment screenshot. Admin will review it manually."
+            "⏳ পেমেন্ট যাচাই সম্পন্ন হয়নি।\n\n"
+            "📸 এখন আপনার payment screenshot আপলোড করুন। Admin manual check করবে।\n\n"
+            f"{support_line()}"
         )
 
     await state.update_data(transaction_id=txid)
     await state.set_state(DepositForm.screenshot)
     await message.answer(
-        "Payment Screenshot Required\n\n"
-        "Now upload the payment screenshot.\n\n"
-        "Admin will match your amount, transaction ID, and screenshot before approval."
+        "📸 Payment Screenshot Required\n\n"
+        "এখন payment screenshot আপলোড করুন।\n\n"
+        "⏳ Admin amount, TXID এবং screenshot মিলিয়ে check করবে।\n"
+        f"{support_line()}"
     )
 
 
 async def _process_deposit_screenshot(message: Message, state: FSMContext, session: AsyncSession) -> None:
     if not message.photo:
-        await message.answer("Please upload a payment screenshot as a photo.")
+        await message.answer("📸 অনুগ্রহ করে payment screenshot photo হিসেবে আপলোড করুন।")
         return
 
     data = await state.get_data()
@@ -1741,13 +1759,13 @@ async def _process_deposit_screenshot(message: Message, state: FSMContext, sessi
     if not required.issubset(data):
         await state.clear()
         await message.answer(
-            "Payment screenshot received, but deposit session was not found.\n\n"
-            "Please start again: Top Up > payment method > amount > TXID > screenshot.",
+            "⚠️ Deposit session পাওয়া যায়নি।\n\n"
+            "আবার শুরু করুন: Deposit > Method > Amount > TXID > Screenshot.",
             reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
         return
 
-    await message.answer("Payment screenshot received.\n\nChecking and submitting your deposit request...")
+    await message.answer("✅ Screenshot পেয়েছি।\n\n⏳ Deposit request submit করা হচ্ছে...")
     user = await get_or_create_user(session, message.from_user)
     settings = get_settings()
     amount = float(data["amount"])
@@ -1811,23 +1829,24 @@ async def _process_deposit_screenshot(message: Message, state: FSMContext, sessi
                 pass
     if auto_approved:
         await message.answer(
-            "Deposit Approved\n\n"
-            f"Request ID: #{deposit.id}\n"
-            f"Amount: {money(deposit.amount)}\n"
+            "✅ Deposit Approved\n\n"
+            f"🧾 Request ID: #{deposit.id}\n"
+            f"💵 Amount: {money(deposit.amount)}\n"
             f"{deposit_bonus_line(float(deposit.amount))}"
-            f"Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n"
-            f"Transaction ID: <code>{deposit.transaction_id}</code>\n\n"
-            "Your balance has been updated automatically.",
+            f"📌 Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n"
+            f"🧾 TXID: <code>{deposit.transaction_id}</code>\n\n"
+            "💰 আপনার ব্যালেন্স যোগ করা হয়েছে।",
             reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
     else:
         await message.answer(
-            "Deposit Request Submitted\n\n"
-            f"Request ID: #{deposit.id}\n"
-            f"Amount: {money(deposit.amount)}\n"
-            f"Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n\n"
-            f"Review note: {review_reason}\n\n"
-            "This deposit needs admin verification before balance is added.",
+            "✅ Deposit Request Submitted\n\n"
+            f"🧾 Request ID: #{deposit.id}\n"
+            f"💵 Amount: {money(deposit.amount)}\n"
+            f"📌 Method: {DEPOSIT_METHOD_LABELS.get(deposit.method, deposit.method.upper())}\n"
+            f"🧾 TXID: <code>{deposit.transaction_id}</code>\n\n"
+            "⏳ Admin payment check করবে।\n"
+            f"{support_line()}",
             reply_markup=await dynamic_main_reply_menu(session, message.from_user.id),
         )
 
@@ -2043,7 +2062,7 @@ async def product_name_text(message: Message, session: AsyncSession, state: FSMC
         active_matches = [(product, stock) for product, stock in matches if product.is_active]
         if active_matches:
             await message.answer(
-                panel("PRODUCT SEARCH", f"Found {len(active_matches)} matching product(s).", "Select from the keyboard below."),
+                f"🛍 মিল পাওয়া পণ্য: {len(active_matches)} টি\n\nপছন্দের পণ্য বেছে নিন।",
                 reply_markup=products_reply_menu(active_matches, message.from_user.id in get_settings().admin_ids),
             )
             return

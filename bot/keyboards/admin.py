@@ -1,11 +1,18 @@
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
-def members_reply_menu(users: list[object]) -> ReplyKeyboardMarkup:
+def members_reply_menu(users: list[object], page: int = 1, has_next: bool = False) -> ReplyKeyboardMarkup:
     rows = []
     buttons = [KeyboardButton(text=f"👤 Member #{user.id}") for user in users]
     for index in range(0, len(buttons), 2):
         rows.append(buttons[index : index + 2])
+    nav_row = []
+    if page > 1:
+        nav_row.append(KeyboardButton(text=f"⬅️ Members Page {page - 1}"))
+    if has_next:
+        nav_row.append(KeyboardButton(text=f"➡️ Members Page {page + 1}"))
+    if nav_row:
+        rows.append(nav_row)
     rows.append([KeyboardButton(text="🔎 Search Member"), KeyboardButton(text="⚙️ Admin Panel")])
     return ReplyKeyboardMarkup(
         keyboard=rows,
@@ -24,7 +31,7 @@ def admin_reply_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="👥 Members"), KeyboardButton(text="📋 All Members")],
             [KeyboardButton(text="📣 Broadcast"), KeyboardButton(text="📈 Reports")],
             [KeyboardButton(text="🔎 Admin Search"), KeyboardButton(text="📤 Export Data")],
-            [KeyboardButton(text="🛠 Maintenance"), KeyboardButton(text="📢 Notice")],
+            [KeyboardButton(text="🛠 Maintenance"), KeyboardButton(text="📢 Notice"), KeyboardButton(text="💼 Sell Toggle")],
             [KeyboardButton(text="🏷 Coupons"), KeyboardButton(text="📊 Stats")],
             [KeyboardButton(text="🏠 Main Menu")],
         ],

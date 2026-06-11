@@ -5,6 +5,7 @@ from bot.database.models import BotSetting
 COUPON_ENABLED_KEY = "coupon_enabled"
 MAINTENANCE_ENABLED_KEY = "maintenance_enabled"
 STORE_NOTICE_KEY = "store_notice"
+SELL_ENABLED_KEY = "sell_enabled"
 
 
 async def get_setting(session: AsyncSession, key: str, default: str = "") -> str:
@@ -43,3 +44,11 @@ async def get_store_notice(session: AsyncSession) -> str:
 
 async def set_store_notice(session: AsyncSession, notice: str) -> None:
     await set_setting(session, STORE_NOTICE_KEY, notice.strip())
+
+
+async def sell_enabled(session: AsyncSession) -> bool:
+    return (await get_setting(session, SELL_ENABLED_KEY, "on")).lower() == "on"
+
+
+async def set_sell_enabled(session: AsyncSession, enabled: bool) -> None:
+    await set_setting(session, SELL_ENABLED_KEY, "on" if enabled else "off")

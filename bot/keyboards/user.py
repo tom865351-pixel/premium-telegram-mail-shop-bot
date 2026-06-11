@@ -1,14 +1,17 @@
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
-def main_reply_menu(is_admin: bool = False, show_coupon: bool = True) -> ReplyKeyboardMarkup:
+def main_reply_menu(is_admin: bool = False, show_coupon: bool = True, show_sell: bool = True) -> ReplyKeyboardMarkup:
     tools_row = [KeyboardButton(text="🔁 Replace")]
     if show_coupon:
         tools_row.append(KeyboardButton(text="🏷 Coupon"))
     tools_row.append(KeyboardButton(text="🎁 Refer"))
+    first_row = [KeyboardButton(text="🛍 Shop"), KeyboardButton(text="💳 Deposit")]
+    if show_sell:
+        first_row.insert(1, KeyboardButton(text="💼 Sell"))
     rows = [
-        [KeyboardButton(text="🛍 Shop"), KeyboardButton(text="💼 Sell"), KeyboardButton(text="💳 Top Up")],
-        [KeyboardButton(text="🤖 AI"), KeyboardButton(text="👤 Profile"), KeyboardButton(text="📜 History")],
+        first_row,
+        [KeyboardButton(text="👤 Profile"), KeyboardButton(text="📜 History")],
         tools_row,
         [KeyboardButton(text="☎️ Support")],
     ]
@@ -18,7 +21,7 @@ def main_reply_menu(is_admin: bool = False, show_coupon: bool = True) -> ReplyKe
         keyboard=rows,
         resize_keyboard=True,
         is_persistent=True,
-        input_field_placeholder="Select an option",
+        input_field_placeholder="একটি অপশন নির্বাচন করুন",
     )
 
 
@@ -33,7 +36,7 @@ def history_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
         keyboard=rows,
         resize_keyboard=True,
         is_persistent=True,
-        input_field_placeholder="Select history",
+        input_field_placeholder="হিস্টোরি নির্বাচন করুন",
     )
 
 
@@ -49,7 +52,7 @@ def products_reply_menu(products: list[tuple[object, int]], is_admin: bool = Fal
         keyboard=rows,
         resize_keyboard=True,
         is_persistent=True,
-        input_field_placeholder="Select product",
+        input_field_placeholder="পণ্য নির্বাচন করুন",
     )
 
 
@@ -64,18 +67,18 @@ def product_buy_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
         keyboard=rows,
         resize_keyboard=True,
         is_persistent=True,
-        input_field_placeholder="Select purchase type",
+        input_field_placeholder="কেনার ধরন নির্বাচন করুন",
     )
 
 
 def deposit_methods_reply_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🟡 Binance"), KeyboardButton(text="TRC20"), KeyboardButton(text="BEP20")],
-            [KeyboardButton(text="bKash"), KeyboardButton(text="Nagad"), KeyboardButton(text="Rocket")],
+            [KeyboardButton(text="🟡 Binance")],
+            [KeyboardButton(text="📱 bKash"), KeyboardButton(text="📱 Nagad")],
             [KeyboardButton(text="Cancel"), KeyboardButton(text="🏠 Main Menu")],
         ],
         resize_keyboard=True,
         is_persistent=True,
-        input_field_placeholder="Select payment method",
+        input_field_placeholder="পেমেন্ট মাধ্যম নির্বাচন করুন",
     )
