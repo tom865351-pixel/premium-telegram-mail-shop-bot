@@ -92,7 +92,7 @@ REQUIRED_CHANNEL_USERNAME=@PremiumXMethod
 REQUIRED_CHANNEL_LINK=https://t.me/PremiumXMethod
 ZINIPAY_TRX_ENABLED=false
 ZINIPAY_API_KEY=
-ZINIPAY_TRX_BASE_URL=https://api.zinipay.com/api/trx
+ZINIPAY_TRX_BASE_URL=https://api.zinipay.com/v1/trx
 ```
 
 On Railway, set `DATABASE_URL` as a reference to your PostgreSQL service. If the bot logs show a hostname error for `postgres.railway.internal`, also set `DATABASE_PUBLIC_URL` from the PostgreSQL service and redeploy.

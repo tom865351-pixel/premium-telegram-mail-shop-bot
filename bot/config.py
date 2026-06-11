@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     required_channel_link: str = Field(default="https://t.me/PremiumXMethod", alias="REQUIRED_CHANNEL_LINK")
     zinipay_trx_enabled: bool = Field(default=False, alias="ZINIPAY_TRX_ENABLED")
     zinipay_api_key: str | None = Field(default=None, alias="ZINIPAY_API_KEY")
-    zinipay_trx_base_url: str = Field(default="https://api.zinipay.com/api/trx", alias="ZINIPAY_TRX_BASE_URL")
+    zinipay_trx_base_url: str = Field(default="https://api.zinipay.com/v1/trx", alias="ZINIPAY_TRX_BASE_URL")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
